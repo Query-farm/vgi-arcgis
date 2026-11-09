@@ -19,6 +19,8 @@ Services
   Points`` (points, JSON only, so the worker must convert Esri JSON), table 2
   ``Owners`` (no geometry).
 * ``Demo/Imagery`` ImageServer (not a feature service; skipped).
+* ``Secured`` FeatureServer that answers every request with error 499 "Token
+  Required" (a subscriber-only service; listed with no views).
 * ``Roads`` MapServer: layer 0 ``Road Centerlines`` (polylines) with no
   ``orderBy`` support but ``resultOffset`` paging.
 * ``Legacy`` MapServer: layer 0 ``Old Points`` with neither ordering nor
@@ -197,6 +199,7 @@ SERVICES = {
 DIRECTORY = {
     "": {"folders": ["Demo"], "services": [{"name": "Roads", "type": "MapServer"},
                                            {"name": "Legacy", "type": "MapServer"},
+                                           {"name": "Secured", "type": "FeatureServer"},
                                            {"name": "Geocoder", "type": "GeocodeServer"}]},
     "Demo": {"folders": [], "services": [{"name": "Demo/Parcels", "type": "FeatureServer"},
                                          {"name": "Demo/Parcels", "type": "MapServer"},
@@ -426,6 +429,10 @@ class Handler(BaseHTTPRequestHandler):
         rest = url.path[len(prefix):].strip("/")
         if rest in DIRECTORY:
             self._send(200, {"currentVersion": 11.3, **DIRECTORY[rest]})
+            return
+        if rest.startswith("Secured/"):
+            # A subscriber-only service: ArcGIS answers 499 without a token.
+            self._error("Token Required", 499)
             return
         m = re.fullmatch(r"(.+)/(FeatureServer|MapServer)(?:/(\d+))?(/query)?", rest)
         if not m or (m.group(1), m.group(2)) not in SERVICES:

@@ -20,7 +20,8 @@ import {
   type ServiceMeta,
   uniqueNames,
 } from "./esri.ts";
-import { getMetadata } from "./http.ts";
+import { getMetadata, isAuthError } from "./http.ts";
+import { log } from "./log.ts";
 
 export interface DiscoveredSchema {
   name: string;
@@ -78,9 +79,20 @@ export async function directorySchemas(dirUrl: string): Promise<DiscoveredSchema
   }));
 }
 
-/** Views for every feature layer and table of a service. */
+/**
+ * Views for every feature layer and table of a service. A service that needs a
+ * token has none: one subscriber-only service must not break listing (or
+ * DuckDB's "did you mean" search over) every other service in a directory.
+ */
 export async function serviceViews(serviceUrl: string): Promise<DiscoveredView[]> {
-  const meta = (await getMetadata(`${serviceUrl}?f=json`)) as ServiceMeta;
+  let meta: ServiceMeta;
+  try {
+    meta = (await getMetadata(`${serviceUrl}?f=json`)) as ServiceMeta;
+  } catch (err) {
+    if (!isAuthError(err)) throw err;
+    log.warn(`skipping ${serviceUrl}: ${(err as Error).message} (token-secured services are not supported)`);
+    return [];
+  }
   const description = (meta.serviceDescription || meta.description || "").replace(/<[^>]+>/g, "").trim();
   const entries: { id: number; name: string; geometryType: string | null | undefined; isTable: boolean }[] = [
     ...(meta.layers ?? [])

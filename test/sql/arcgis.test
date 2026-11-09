@@ -129,6 +129,7 @@ demo_parcels
 legacy
 main
 roads
+secured
 
 query TT
 SELECT schema_name, view_name FROM duckdb_views() WHERE database_name = 'dir' ORDER BY 1, 2;
@@ -138,6 +139,19 @@ demo_parcels	owners
 demo_parcels	tax_parcels
 legacy	old_points
 roads	road_centerlines
+
+# A token-secured service (ArcGIS error 499) lists no views instead of failing
+# the listing above, and a misspelled name still gets DuckDB's own error even
+# though its "did you mean" search visits the secured schema.
+query I
+SELECT count(*) FROM duckdb_views() WHERE database_name = 'dir' AND schema_name = 'secured';
+----
+0
+
+statement error
+SELECT * FROM dir.roads.road_centerline;
+----
+<REGEX>:.*does not exist.*
 
 # Views expose GEOMETRY and honour precision 2.
 query TT

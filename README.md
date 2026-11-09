@@ -114,12 +114,17 @@ metadata is cached for 5 minutes.
 
 ## Limitations
 
-- **Public services only.** Token-secured services are not supported yet.
+- **Public services only.** Token-secured services are not supported yet. In a directory,
+  a service that requires a token (ArcGIS error 498/499, HTTP 401/403) appears as a schema
+  with no views, and the worker logs a warning.
 - **ArcGIS REST URLs only.** ArcGIS Hub / Open Data site URLs are rejected. Use the REST
   services directory behind the site; Hub datasets point at those layers.
 - **No spatial pushdown** (see above).
 - **Imagery and other services** (ImageServer, GeocodeServer, GPServer) are skipped.
-- Tested with Haybarn 2.0 and stock DuckDB; see [Testing](#testing).
+- **DuckDB 2.0 axis order.** Geometry is longitude/latitude. Spheroid functions such as
+  `ST_Area_Spheroid` need `SET geometry_always_xy = true` (the default from DuckDB 2.1).
+- A misspelled table name makes DuckDB look for similar names, which fetches the
+  metadata of each similarly named service (cached for 5 minutes).
 
 ## Getting the worker
 
@@ -147,6 +152,18 @@ ATTACH 'arcgis' (TYPE vgi, LOCATION 'https://your-host/', url '...');
 
 Put a hosted worker behind TLS and authentication; see
 [authentication](https://query.farm/vgi/authentication).
+
+## Tested against
+
+Stock DuckDB 2.0.0 (VGI from the `query_farm` repository) and Haybarn 2.0.0rc11:
+
+| Server | Kind | Checked |
+|---|---|---|
+| [VGIN](https://vgin.vdem.virginia.gov) (Virginia) | ArcGIS Enterprise, 71 services | parcels by FIPS (5,811 for Covington), polygons, spatial join |
+| Esri ArcGIS Online (`services.arcgis.com/P3ePLMYs2RVChkJx`) | hosted, 1,349 services, includes subscriber-only services | state boundaries, population, `ST_Area_Spheroid` |
+| DC GIS (`maps2.dcgis.dc.gov`) | ArcGIS Enterprise 11.5, folder attach | 8 wards (2022), 177.5 km² |
+| Census TIGERweb | MapServer only, string OID field, 100,000-row pages | 133 Virginia counties, 3,235 US counties |
+| Esri sampleserver6 | ArcGIS Server 10.91 | world cities (points) |
 
 ## Testing
 

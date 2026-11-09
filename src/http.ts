@@ -13,7 +13,20 @@ export const METADATA_TTL_MS = 5 * 60_000;
 const USER_AGENT = `vgi-arcgis-worker/${VERSION}`;
 
 /** The server returned an error we will not retry. */
-export class ArcgisError extends Error {}
+export class ArcgisError extends Error {
+  /** The ArcGIS error code from the response body, or the HTTP status; 0 for network failures. */
+  constructor(
+    message: string,
+    readonly code = 0,
+  ) {
+    super(message);
+  }
+}
+
+/** True when the service needs a token or denies access (ArcGIS 498/499, HTTP 401/403). */
+export function isAuthError(err: unknown): boolean {
+  return err instanceof ArcgisError && [401, 403, 498, 499].includes(err.code);
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -31,6 +44,7 @@ function retryable(status: number): boolean {
  * the body are retried like HTTP 5xx).
  */
 export async function getJson(url: string): Promise<unknown> {
+  log.debug(`GET ${url}`);
   for (let attempt = 1; ; attempt++) {
     let response: Response;
     try {
@@ -46,7 +60,7 @@ export async function getJson(url: string): Promise<unknown> {
     if (!response.ok) {
       if (!retryable(response.status) || attempt >= MAX_ATTEMPTS) {
         const body = (await response.text()).slice(0, 300);
-        throw new ArcgisError(`GET ${url} failed with HTTP ${response.status}: ${body}`);
+        throw new ArcgisError(`GET ${url} failed with HTTP ${response.status}: ${body}`, response.status);
       }
       await response.body?.cancel();
       const retryAfter = response.headers.get("Retry-After");
@@ -63,7 +77,10 @@ export async function getJson(url: string): Promise<unknown> {
         continue;
       }
       const details = Array.isArray(body.error.details) && body.error.details.length ? ` ${body.error.details}` : "";
-      throw new ArcgisError(`ArcGIS error ${code} from ${url}: ${body.error.message ?? "unknown error"}${details}`);
+      throw new ArcgisError(
+        `ArcGIS error ${code} from ${url}: ${body.error.message ?? "unknown error"}${details}`,
+        code,
+      );
     }
     return body;
   }
