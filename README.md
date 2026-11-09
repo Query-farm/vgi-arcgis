@@ -164,6 +164,9 @@ Stock DuckDB 2.0.0 (VGI from the `query_farm` repository) and Haybarn 2.0.0rc11:
 | DC GIS (`maps2.dcgis.dc.gov`) | ArcGIS Enterprise 11.5, folder attach | 8 wards (2022), 177.5 km² |
 | Census TIGERweb | MapServer only, string OID field, 100,000-row pages | 133 Virginia counties, 3,235 US counties |
 | Esri sampleserver6 | ArcGIS Server 10.91 | world cities (points) |
+| NYS GIS (`gisservices.its.ny.gov`) | ArcGIS Server 10.81, 22 services | 62 counties, 141,343 km² |
+| USGS National Map (`index.nationalmap.gov`) | ArcGIS 11.3, index layers | 22 HU2 hydrologic regions |
+| Caltrans, a California State Geoportal (Hub) dataset, by its layer URL | ArcGIS Server | 12 districts |
 
 ## Testing
 
