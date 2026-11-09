@@ -123,7 +123,9 @@ DuckDB passes the query's filters and its column list to the worker:
 
 ## Paging
 
-Results are fetched in pages of the layer's `maxRecordCount`:
+Results are fetched in pages. With geometry, the first page is 100 rows and pages grow
+fourfold up to the layer's `maxRecordCount`, so the first rows and `LIMIT` queries come back
+quickly. Attribute-only scans use `maxRecordCount` pages throughout. Pages are fetched:
 
 - by object ID, when the layer supports ordering;
 - by offset, when it only supports pagination;

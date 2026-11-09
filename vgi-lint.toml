@@ -20,6 +20,13 @@ ignore = [
   { code = "VGI910", kind = "domain-exemption", reason = "arcgis_query's columns are the attribute fields of whatever remote layer the url names, so no declared schema can match every layer; the fixed geometry_geojson column is declared and the rest is documented in vgi.result_dynamic_columns_md" },
 ]
 
+# Every scan probe reads a live public ArcGIS server (Virginia's VGIN). Its first page
+# is small (100 rows) and normally arrives in under a second, but the server sometimes
+# stalls for 15-20 s on a cold query, which failed VGI911 at the default 10 s. 30 s
+# still catches a real hang (a wedged scan never returns) without flaking on a stall.
+[execution]
+scan_timeout = 30
+
 # Adopting the gate on a worker that already has findings? Record them once with
 #   vgi-lint lint --baseline vgi-lint-baseline --update-baseline
 # and uncomment the next line. Only new findings fail after that.

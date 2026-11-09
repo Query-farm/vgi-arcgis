@@ -13,6 +13,10 @@ Breaking: some schema and view names change.
 - Names without spaces are split at CamelCase boundaries (`USTopoAvailability` →
   `us_topo_availability`).
 - Views carry `arcgis.layer_id` and `arcgis.layer_path` tags.
+- Faster first rows: a scan with geometry starts with a 100-row page and grows fourfold to
+  the layer's `maxRecordCount`, so `SELECT * … LIMIT 10` on a large layer takes ~0.4 s
+  instead of fetching a full 2,000-feature page first. Attribute-only scans still use full
+  pages.
 
 ## 0.1.1
 

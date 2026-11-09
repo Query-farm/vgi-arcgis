@@ -41,6 +41,8 @@ interface QueryState {
   started: boolean;
   /** Rows emitted so far (offset paging). */
   offset: number;
+  /** Pages fetched so far; sizes the next one (see pageSize). */
+  pages: number;
   done: boolean;
 }
 
@@ -55,6 +57,24 @@ export async function layerMeta(url: string): Promise<{ url: string; meta: Layer
   const meta = (await getMetadata(`${target.url}?f=json`)) as LayerMeta;
   if (!Array.isArray(meta.fields)) throw new ArcgisError(`${target.url} has no field list; is it a feature layer?`);
   return { url: target.url, meta };
+}
+
+/** Rows in the first page: small, so the first rows (and a LIMIT query) come back fast. */
+export const FIRST_PAGE = 100;
+
+/**
+ * `resultRecordCount` for the next page. With geometry, pages run to megabytes,
+ * so they start at FIRST_PAGE and grow fourfold to the layer's maxRecordCount:
+ * the first rows (and a LIMIT query) arrive fast, and a long scan costs only a
+ * couple of extra requests. Attribute-only pages are small; they use
+ * maxRecordCount from the start. Undefined when the layer does not support
+ * pagination: ArcGIS only honours resultRecordCount there, so its own page size
+ * applies.
+ */
+export function pageSize(meta: LayerMeta, pages: number, withGeometry: boolean): number | undefined {
+  if (!meta.advancedQueryCapabilities?.supportsPagination) return undefined;
+  const max = meta.maxRecordCount ?? 1000;
+  return withGeometry ? Math.min(max, FIRST_PAGE * 4 ** Math.min(pages, 10)) : max;
 }
 
 export function pagingMode(meta: LayerMeta): PagingMode {
@@ -130,7 +150,7 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
     return { outputSchema: schema(columns) };
   },
 
-  initialState: () => ({ lastOid: 0, started: false, offset: 0, done: false }),
+  initialState: () => ({ lastOid: 0, started: false, offset: 0, pages: 0, done: false }),
 
   process: async (params, state, out) => {
     if (state.done) {
@@ -164,10 +184,9 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
     });
     if (wantGeometry) q.set("geometryPrecision", String(settings.precision));
     if (mode === "keyset") q.set("orderByFields", `${oid} ASC`);
-    if (mode === "offset") {
-      q.set("resultOffset", String(state.offset));
-      q.set("resultRecordCount", String(meta.maxRecordCount ?? 1000));
-    }
+    const size = pageSize(meta, state.pages, wantGeometry && Boolean(meta.geometryType));
+    if (mode === "offset") q.set("resultOffset", String(state.offset));
+    if (size !== undefined && mode !== "single") q.set("resultRecordCount", String(size));
     if (state.offset === 0)
       log.debug(`arcgis_query ${url}: mode=${mode} where=${where} outFields=${q.get("outFields")}`);
 
@@ -201,6 +220,7 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
     out.emit(batchFromColumns(columns, params.outputSchema));
 
     state.offset += features.length;
+    state.pages += 1;
     if (mode === "keyset" && oid) {
       for (const f of features) {
         const v = Number(attributesOf(f)[oid] ?? f.id);

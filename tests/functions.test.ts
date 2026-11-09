@@ -9,7 +9,7 @@ import { attributeFields, classifyUrl, esriToGeoJson, supportsGeoJson } from "..
 import { getJson } from "../src/http.ts";
 import { assignNames, sqlName } from "../src/naming.ts";
 import { decodeSettings, encodeSettings, settingsFromOptions } from "../src/options.ts";
-import { pagingMode } from "../src/query.ts";
+import { FIRST_PAGE, pageSize, pagingMode } from "../src/query.ts";
 import { WhereBuilder } from "../src/where.ts";
 
 const ROOT = join(import.meta.dir, "..");
@@ -126,6 +126,20 @@ describe("esri helpers", () => {
     expect(sqlName("VA_Base_Layers_VA_Parcels")).toBe("va_base_layers_va_parcels");
     // Names with spaces are not split (McDonald County, not mc_donald_county).
     expect(sqlName("McDonald County")).toBe("mcdonald_county");
+  });
+
+  test("pageSize: small first page with geometry, growing to maxRecordCount", () => {
+    const paged = { maxRecordCount: 2000, advancedQueryCapabilities: { supportsPagination: true } } as never;
+    expect([0, 1, 2, 3, 9].map((n) => pageSize(paged, n, true))).toEqual([FIRST_PAGE, 400, 1600, 2000, 2000]);
+    // Attribute-only pages are small: full pages from the start.
+    expect(pageSize(paged, 0, false)).toBe(2000);
+    // A layer smaller than the first page: never more than it allows.
+    expect(
+      pageSize({ maxRecordCount: 2, advancedQueryCapabilities: { supportsPagination: true } } as never, 0, true),
+    ).toBe(2);
+    // No pagination support: ArcGIS ignores resultRecordCount, so none is sent.
+    const unpaged = { maxRecordCount: 2000, advancedQueryCapabilities: { supportsPagination: false } } as never;
+    expect(pageSize(unpaged, 0, true)).toBe(undefined);
   });
 
   test("assignNames: collisions qualify every member, by group then id", () => {
