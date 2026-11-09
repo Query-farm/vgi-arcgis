@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { Arguments, type PushdownFilters, VgiClient } from "@query-farm/vgi";
 import { subprocessConnect } from "@query-farm/vgi-rpc";
 import { viewDefinition } from "../src/discovery.ts";
-import { attributeFields, classifyUrl, esriToGeoJson, sqlName, supportsGeoJson, uniqueNames } from "../src/esri.ts";
+import { attributeFields, classifyUrl, esriToGeoJson, supportsGeoJson } from "../src/esri.ts";
 import { getJson } from "../src/http.ts";
+import { assignNames, sqlName } from "../src/naming.ts";
 import { decodeSettings, encodeSettings, settingsFromOptions } from "../src/options.ts";
 import { pagingMode } from "../src/query.ts";
 import { WhereBuilder } from "../src/where.ts";
@@ -108,13 +109,62 @@ describe("esri helpers", () => {
     expect(() => classifyUrl("not a url")).toThrow(/valid URL/);
   });
 
-  test("sqlName and uniqueNames", () => {
+  test("sqlName: readable, unquoted-safe identifiers", () => {
     expect(sqlName("Tax Parcels (2024)")).toBe("tax_parcels_2024");
-    expect(sqlName("911 Addresses")).toBe("l_911_addresses");
     expect(sqlName("Économie")).toBe("economie");
     expect(sqlName("!!!")).toBe("unnamed");
-    expect(uniqueNames(["Roads", "roads", "Roads"], [0, 4, 7])).toEqual(["roads", "roads_4", "roads_7"]);
-    expect(uniqueNames(["Main"], undefined, ["main"])).toEqual(["main_2"]);
+    // Leading digits get "_", not an arbitrary prefix.
+    expect(sqlName("911 Addresses")).toBe("_911_addresses");
+    expect(sqlName("> 49,999")).toBe("_49_999");
+    // Identifier-like names split at CamelCase, acronyms kept whole.
+    expect(sqlName("USGSImageryIndex")).toBe("usgs_imagery_index");
+    // Adjacent acronyms cannot be split without a dictionary.
+    expect(sqlName("USGSNAIPImageryIndex")).toBe("usgsnaip_imagery_index");
+    expect(sqlName("3DEPElevationIndex")).toBe("_3dep_elevation_index");
+    expect(sqlName("NHDPlus_HR_Index")).toBe("nhd_plus_hr_index");
+    expect(sqlName("USTopoAvailability")).toBe("us_topo_availability");
+    expect(sqlName("VA_Base_Layers_VA_Parcels")).toBe("va_base_layers_va_parcels");
+    // Names with spaces are not split (McDonald County, not mc_donald_county).
+    expect(sqlName("McDonald County")).toBe("mcdonald_county");
+  });
+
+  test("assignNames: collisions qualify every member, by group then id", () => {
+    // USGS 3DEPElevationIndex repeats layers under two group layers.
+    const usgs = [
+      { name: "1 meter", groups: ["DEM Product Index"], id: 1 },
+      { name: "Lidar Point Cloud", groups: ["Source Data Index - Lidar, Ifsar, DEM"], id: 8 },
+      { name: "Topobathy AOI", groups: ["Topobathymetric Data Index"], id: 13 },
+      { name: "1 Meter", groups: ["Query"], id: 18 },
+      { name: "Lidar Point Cloud", groups: ["Query"], id: 24 },
+      { name: "Ifsar DSM (Alaska only) Project", groups: ["Query"], id: 25 },
+    ];
+    expect(assignNames(usgs)).toEqual([
+      "dem_product_index_1_meter",
+      "source_data_index_lidar_ifsar_dem_lidar_point_cloud",
+      "topobathy_aoi",
+      "query_1_meter",
+      "query_lidar_point_cloud",
+      "ifsar_dsm_alaska_only_project",
+    ]);
+    // Stable: the same structure in another order gives the same names.
+    const reversed = assignNames([...usgs].reverse());
+    expect(reversed.reverse()).toEqual(assignNames(usgs));
+    // Nested groups: the innermost group first, then the next one out.
+    expect(
+      assignNames([
+        { name: "Roads", groups: ["2020", "Local"], id: 3 },
+        { name: "Roads", groups: ["2024", "Local"], id: 7 },
+      ]),
+    ).toEqual(["_2020_local_roads", "_2024_local_roads"]);
+    // No groups to tell them apart: every member gets its id.
+    expect(
+      assignNames([
+        { name: "Roads", id: 0 },
+        { name: "roads", id: 4 },
+      ]),
+    ).toEqual(["roads_0", "roads_4"]);
+    // Reserved names are avoided.
+    expect(assignNames([{ name: "Main", id: "FeatureServer" }], ["main"])).toEqual(["main_feature_server"]);
   });
 
   test("attributeFields drops unsupported and reserved fields", () => {

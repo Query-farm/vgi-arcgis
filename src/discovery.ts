@@ -12,16 +12,10 @@
  * `geometry_geojson` for a GEOMETRY column built by DuckDB spatial.
  */
 
-import {
-  classifyUrl,
-  type DirectoryMeta,
-  GEOMETRY_GEOJSON,
-  type LayerMeta,
-  type ServiceMeta,
-  uniqueNames,
-} from "./esri.ts";
+import { classifyUrl, type DirectoryMeta, GEOMETRY_GEOJSON, type LayerMeta, type ServiceMeta } from "./esri.ts";
 import { getMetadata, isAuthError } from "./http.ts";
 import { log } from "./log.ts";
+import { assignNames, sqlName } from "./naming.ts";
 
 export interface DiscoveredSchema {
   name: string;
@@ -35,6 +29,10 @@ export interface DiscoveredView {
   definition: string;
   layerUrl: string;
   hasGeometry: boolean;
+  /** The layer's id within its service. */
+  layerId: number;
+  /** Group layers enclosing it, outermost first, then its own name. */
+  layerPath: string[];
 }
 
 const sqlString = (s: string) => `'${s.replace(/'/g, "''")}'`;
@@ -67,9 +65,9 @@ export async function directorySchemas(dirUrl: string): Promise<DiscoveredSchema
     if (!prior || (prior.type === "MapServer" && svc.type === "FeatureServer")) byName.set(svc.name, svc);
   }
   const services = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
-  const names = uniqueNames(
-    services.map((s) => s.name.replace(/\//g, "_")),
-    undefined,
+  // Schema names keep the folder (`Folder/Service` → `folder_service`).
+  const names = assignNames(
+    services.map((s) => ({ name: s.name.replace(/\//g, " ").replace(/\s+/g, "_"), id: s.type })),
     ["main"],
   );
   return services.map((svc, i) => ({
@@ -94,11 +92,38 @@ export async function serviceViews(serviceUrl: string): Promise<DiscoveredView[]
     return [];
   }
   const description = (meta.serviceDescription || meta.description || "").replace(/<[^>]+>/g, "").trim();
-  const entries: { id: number; name: string; geometryType: string | null | undefined; isTable: boolean }[] = [
+  // Group layers are not queryable, but they name what they contain: services
+  // often repeat a layer under several groups ("DEM Product Index" > "1 meter"
+  // and "Query" > "1 Meter"), and the group tells those apart.
+  const byId = new Map((meta.layers ?? []).map((l) => [l.id, l]));
+  const groupsOf = (parentId: number | undefined): string[] => {
+    const out: string[] = [];
+    const seen = new Set<number>();
+    for (let p = parentId; p !== undefined && p >= 0 && !seen.has(p); p = byId.get(p)?.parentLayerId) {
+      seen.add(p);
+      const parent = byId.get(p);
+      if (!parent) break;
+      out.unshift(parent.name);
+    }
+    return out;
+  };
+  const entries: {
+    id: number;
+    name: string;
+    groups: string[];
+    geometryType: string | null | undefined;
+    isTable: boolean;
+  }[] = [
     ...(meta.layers ?? [])
       .filter((l) => !l.type || /feature layer/i.test(l.type))
-      .map((l) => ({ id: l.id, name: l.name, geometryType: l.geometryType, isTable: false })),
-    ...(meta.tables ?? []).map((t) => ({ id: t.id, name: t.name, geometryType: null, isTable: true })),
+      .map((l) => ({
+        id: l.id,
+        name: l.name,
+        groups: groupsOf(l.parentLayerId),
+        geometryType: l.geometryType,
+        isTable: false,
+      })),
+    ...(meta.tables ?? []).map((t) => ({ id: t.id, name: t.name, groups: [], geometryType: null, isTable: true })),
   ];
   // MapServer listings may omit geometryType; read the layer's own metadata then.
   await Promise.all(
@@ -109,10 +134,7 @@ export async function serviceViews(serviceUrl: string): Promise<DiscoveredView[]
         e.geometryType = layer.geometryType ?? null;
       }),
   );
-  const names = uniqueNames(
-    entries.map((e) => e.name),
-    entries.map((e) => e.id),
-  );
+  const names = assignNames(entries.map((e) => ({ name: e.name, groups: e.groups, id: e.id })));
   return entries.map((e, i) => {
     const layerUrl = `${serviceUrl}/${e.id}`;
     const hasGeometry = Boolean(e.geometryType);
@@ -123,6 +145,8 @@ export async function serviceViews(serviceUrl: string): Promise<DiscoveredView[]
       definition: viewDefinition(layerUrl, hasGeometry),
       layerUrl,
       hasGeometry,
+      layerId: e.id,
+      layerPath: [...e.groups, e.name],
     };
   });
 }
@@ -134,11 +158,13 @@ export async function layerViews(layerUrl: string): Promise<DiscoveredView[]> {
   const name = meta.name ?? "layer";
   return [
     {
-      name: uniqueNames([name])[0] as string,
+      name: sqlName(name),
       comment: `${name} (ArcGIS layer ${layerUrl})`,
       definition: viewDefinition(layerUrl, hasGeometry),
       layerUrl,
       hasGeometry,
+      layerId: Number(layerUrl.match(/\/(\d+)$/)?.[1] ?? 0),
+      layerPath: [name],
     },
   ];
 }

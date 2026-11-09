@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+Breaking: some schema and view names change.
+
+- Colliding layer names are told apart by their group layers, and every member of a
+  collision is renamed, so names no longer depend on listing order. On USGS 3DEP,
+  `l_1_meter` / `l_1_meter_18` are now `dem_product_index_1_meter` / `query_1_meter`. The
+  layer ID is appended only when groups can't separate them.
+- A name that starts with a digit gets a leading `_` instead of `l_` (`l_49_999` →
+  `_49_999`).
+- Names without spaces are split at CamelCase boundaries (`USTopoAvailability` →
+  `us_topo_availability`).
+- Views carry `arcgis.layer_id` and `arcgis.layer_path` tags.
+
 ## 0.1.1
 
 - A token-secured service in a services directory (ArcGIS error 498/499, HTTP 401/403)

@@ -71,7 +71,7 @@ export interface LayerMeta {
 export interface ServiceMeta {
   serviceDescription?: string;
   description?: string;
-  layers?: { id: number; name: string; type?: string; geometryType?: string | null }[];
+  layers?: { id: number; name: string; type?: string; geometryType?: string | null; parentLayerId?: number }[];
   tables?: { id: number; name: string; type?: string }[];
 }
 
@@ -122,31 +122,6 @@ export function attributeFields(meta: LayerMeta): EsriField[] {
 /** Does the layer answer `f=geojson` queries? */
 export function supportsGeoJson(meta: LayerMeta): boolean {
   return (meta.supportedQueryFormats ?? "").split(",").some((f) => f.trim().toLowerCase() === "geojson");
-}
-
-/** A SQL identifier from an ArcGIS name: lowercase, `[a-z0-9_]`, not starting with a digit. */
-export function sqlName(name: string): string {
-  const base = name
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  if (!base) return "unnamed";
-  return /^[0-9]/.test(base) ? `l_${base}` : base;
-}
-
-/** Map names to unique SQL names; a clash gets a `_<n>` suffix (n = `ids[i]` when given). */
-export function uniqueNames(names: string[], ids?: number[], taken: Iterable<string> = []): string[] {
-  const used = new Set(taken);
-  return names.map((n, i) => {
-    const base = sqlName(n);
-    let candidate = base;
-    let k = ids?.[i] ?? 2;
-    while (used.has(candidate)) candidate = `${base}_${k++}`;
-    used.add(candidate);
-    return candidate;
-  });
 }
 
 type Position = number[];

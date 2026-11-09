@@ -19,6 +19,8 @@ Services
   Points`` (points, JSON only, so the worker must convert Esri JSON), table 2
   ``Owners`` (no geometry).
 * ``Demo/Imagery`` ImageServer (not a feature service; skipped).
+* ``3DEPIndex`` MapServer: "1 meter" under group "DEM Product Index" and
+  "1 Meter" under group "Query" (duplicate names told apart by group).
 * ``Secured`` FeatureServer that answers every request with error 499 "Token
   Required" (a subscriber-only service; listed with no views).
 * ``Roads`` MapServer: layer 0 ``Road Centerlines`` (polylines) with no
@@ -133,11 +135,12 @@ def _rows(fields: list, values: list) -> list:
     return [dict(zip(names, v)) for v in values]
 
 
-def _layer(lid, name, kind, fields, geometry_type, formats, order_by=True, pagination=True):
+def _layer(lid, name, kind, fields, geometry_type, formats, order_by=True, pagination=True, parent=-1):
     return {
         "id": lid,
         "name": name,
         "type": kind,
+        "parentLayerId": parent,
         "geometryType": geometry_type,
         "objectIdField": "OBJECTID",
         "fields": fields,
@@ -206,6 +209,28 @@ DIRECTORY = {
                                          {"name": "Demo/Imagery", "type": "ImageServer"}]},
 }
 SERVICES[("Demo/Parcels", "MapServer")] = SERVICES[("Demo/Parcels", "FeatureServer")]
+
+
+def _group(lid, name):
+    return (_layer(lid, name, "Group Layer", [], None, "JSON"), [])
+
+
+def _legacy_points(lid, name, parent):
+    return (_layer(lid, name, "Feature Layer", LEGACY_FIELDS, "esriGeometryPoint", "JSON", parent=parent),
+            [({"OBJECTID": o, "KIND": k}, {"x": p[0], "y": p[1]}, None) for o, k, p in LEGACY])
+
+
+# Like USGS 3DEPElevationIndex: one layer repeated under two group layers,
+# names that need CamelCase splitting and a leading-digit fix.
+SERVICES[("3DEPIndex", "MapServer")] = {
+    "layers": {0: _group(0, "DEM Product Index"),
+               1: _legacy_points(1, "1 meter", 0),
+               2: _group(2, "Query"),
+               3: _legacy_points(3, "1 Meter", 2),
+               4: _legacy_points(4, "Coverage", 2)},
+    "tables": {},
+}
+DIRECTORY[""]["services"].append({"name": "3DEPIndex", "type": "MapServer"})
 
 # ---------------------------------------------------------------- where parser
 
@@ -445,7 +470,8 @@ class Handler(BaseHTTPRequestHandler):
                 "serviceDescription": f"Mock {m.group(1)}",
                 "maxRecordCount": MAX_RECORDS,
                 "layers": [{"id": i, "name": meta["name"], "type": meta["type"],
-                            "geometryType": meta["geometryType"]} for i, (meta, _) in svc["layers"].items()],
+                            "geometryType": meta["geometryType"], "parentLayerId": meta["parentLayerId"]}
+                           for i, (meta, _) in svc["layers"].items()],
                 "tables": [{"id": i, "name": meta["name"], "type": "Table"} for i, (meta, _) in svc["tables"].items()],
             })
             return

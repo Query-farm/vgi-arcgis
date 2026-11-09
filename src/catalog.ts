@@ -67,7 +67,11 @@ function toViewInfo(v: DiscoveredView, path: string[]): ViewInfo {
     name: v.name,
     schema_path: path,
     comment: v.comment,
-    tags: { "arcgis.layer_url": v.layerUrl },
+    tags: {
+      "arcgis.layer_url": v.layerUrl,
+      "arcgis.layer_id": String(v.layerId),
+      "arcgis.layer_path": v.layerPath.join(" > "),
+    },
     definition: v.definition,
     column_comments: v.hasGeometry ? { geometry: "Feature geometry (WGS84), parsed from ArcGIS GeoJSON." } : {},
     aliases: [],

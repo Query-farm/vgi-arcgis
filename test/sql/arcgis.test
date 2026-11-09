@@ -125,6 +125,7 @@ ATTACH 'arcgis' AS dir (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_
 query T
 SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'dir' ORDER BY 1;
 ----
+_3dep_index
 demo_parcels
 legacy
 main
@@ -134,6 +135,9 @@ secured
 query TT
 SELECT schema_name, view_name FROM duckdb_views() WHERE database_name = 'dir' ORDER BY 1, 2;
 ----
+_3dep_index	coverage
+_3dep_index	dem_product_index_1_meter
+_3dep_index	query_1_meter
 demo_parcels	address_points
 demo_parcels	owners
 demo_parcels	tax_parcels
@@ -143,6 +147,22 @@ roads	road_centerlines
 # A token-secured service (ArcGIS error 499) lists no views instead of failing
 # the listing above, and a misspelled name still gets DuckDB's own error even
 # though its "did you mean" search visits the secured schema.
+# Names: "3DEPIndex" is split at CamelCase and gets a leading "_" (it starts
+# with a digit); "1 meter" appears under two group layers, so both copies are
+# named after their group. Each view's tags carry the layer id and group path.
+query TTT
+SELECT view_name, tags['arcgis.layer_id'], tags['arcgis.layer_path'] FROM duckdb_views()
+WHERE database_name = 'dir' AND schema_name = '_3dep_index' ORDER BY 1;
+----
+coverage	4	Query > Coverage
+dem_product_index_1_meter	1	DEM Product Index > 1 meter
+query_1_meter	3	Query > 1 Meter
+
+query II
+SELECT count(*), sum(objectid) FROM dir._3dep_index.query_1_meter;
+----
+3	6
+
 query I
 SELECT count(*) FROM duckdb_views() WHERE database_name = 'dir' AND schema_name = 'secured';
 ----

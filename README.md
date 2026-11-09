@@ -43,10 +43,31 @@ What the `url` points at decides the layout:
 | A service, `…/FeatureServer` or `…/MapServer` | One view per layer and table, in `main`. |
 | A layer, `…/FeatureServer/0` | One view in `main`. |
 
-Names are lowercased and reduced to `[a-z0-9_]`. A name that starts with a digit gets an `l_`
-prefix. When a service has both a FeatureServer and a MapServer, the FeatureServer is used.
+When a service has both a FeatureServer and a MapServer, the FeatureServer is used.
 Services are listed when you attach; each schema's views are fetched the first time you use
 them.
+
+### Names
+
+Schema and view names are valid DuckDB identifiers that never need quoting, and they stay the
+same as long as the service's structure does:
+
+- Lowercase words joined by `_`. Names without spaces, like most service names, are split at
+  CamelCase boundaries: `USTopoAvailability` becomes `us_topo_availability`.
+- A name that would start with a digit gets a leading `_`: `_3dep_elevation_index`,
+  `_2024_tile_index`.
+- When names collide, every one of them is renamed, not just the later ones. Each takes the name
+  of its enclosing group layer, innermost first. For example, USGS lists "1 meter" under both
+  "DEM Product Index" and "Query", which become `dem_product_index_1_meter` and
+  `query_1_meter`. Only when groups don't tell them apart is the layer ID appended
+  (`sewers_1999_5`, `sewers_1999_31`).
+
+Each view's tags record where it came from: `arcgis.layer_url`, `arcgis.layer_id` and
+`arcgis.layer_path` (`DEM Product Index > 1 meter`).
+
+```sql
+SELECT view_name, tags['arcgis.layer_path'] FROM duckdb_views() WHERE database_name = 'va';
+```
 
 ```sql
 SHOW ALL TABLES;                                   -- after ATTACH
