@@ -1,0 +1,245 @@
+# name: test/sql/arcgis.test
+# description: SQL-level tests for the arcgis worker against the mock ArcGIS server (test/mock_api/server.py)
+# group: [arcgis]
+
+require vgi
+
+require-env ARCGIS_WORKER
+
+require-env ARCGIS_MOCK_API
+
+# The views use ST_GeomFromGeoJSON (spatial + json). Normal DuckDB sessions
+# autoload both; this runner does not.
+statement ok
+LOAD spatial;
+
+statement ok
+LOAD json;
+
+# ============================================================ no url: the function only
+
+statement ok
+ATTACH 'arcgis' (TYPE vgi, LOCATION '{ARCGIS_WORKER}');
+
+# Typed columns from the layer's field list; paged (maxRecordCount is 2).
+query ITTRIIT
+SELECT OBJECTID, PARCEL_ID, FIPS, ACRES, YEAR_BUILT, FLOORS, UPDATED::DATE::VARCHAR
+FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+ORDER BY OBJECTID;
+----
+1	A-1	51001	1.5	1990	1	1970-01-11
+2	A-2	51001	2.25	2005	2	1970-01-21
+3	B-1	51003	NULL	NULL	NULL	NULL
+4	B-2	51003	10.0	1975	3	1970-01-31
+5	C'1	51005	0.123456789	2021	1	1970-02-10
+
+query T
+SELECT typeof(OBJECTID) || ',' || typeof(ACRES) || ',' || typeof(FLOORS) || ',' || typeof(UPDATED) || ',' || typeof(geometry_geojson)
+FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0') LIMIT 1;
+----
+INTEGER,DOUBLE,SMALLINT,TIMESTAMP_MS,VARCHAR
+
+query I
+SELECT count(*) FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0');
+----
+5
+
+# Pushed-down and DuckDB-side predicates together, including a quote in a value.
+query T
+SELECT PARCEL_ID FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+WHERE FIPS IN ('51001', '51005') AND YEAR_BUILT > 1995 AND PARCEL_ID <> 'zzz'
+ORDER BY 1;
+----
+A-2
+C'1
+
+query T
+SELECT PARCEL_ID FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+WHERE PARCEL_ID = 'C''1' OR ACRES IS NULL
+ORDER BY 1;
+----
+B-1
+C'1
+
+query T
+SELECT PARCEL_ID FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+WHERE PARCEL_ID LIKE 'B%' ORDER BY 1;
+----
+B-1
+B-2
+
+# No matching rows on the server (regression: an empty page used to stall the stream).
+query I
+SELECT count(*) FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+WHERE FIPS = 'none';
+----
+0
+
+# Rows from the server, all removed by a predicate only DuckDB-side semantics can apply.
+query I
+SELECT count(*) FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+WHERE PARCEL_ID > 'zzz';
+----
+0
+
+# A string range is not sent to the server but is still applied exactly.
+query T
+SELECT PARCEL_ID FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+WHERE PARCEL_ID >= 'B' AND PARCEL_ID < 'C' ORDER BY 1;
+----
+B-1
+B-2
+
+# GeoJSON passes through, rounded to the default precision of 7 decimals.
+query T
+SELECT ST_AsText(ST_GeomFromGeoJSON(geometry_geojson))
+FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+WHERE OBJECTID = 5;
+----
+POLYGON ((-77.1234568 37.9876543, -77.1 37.98, -77.1 38, -77.1234568 37.9876543))
+
+# Only a layer URL is accepted.
+statement error
+SELECT * FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Roads/MapServer');
+----
+<REGEX>:.*
+
+# A server that can neither order nor page: a filtered query that fits works...
+query T
+SELECT KIND FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Legacy/MapServer/0') WHERE KIND = 'a';
+----
+a
+
+# ...and a truncated one fails loudly instead of returning partial results.
+statement error
+SELECT count(*) FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Legacy/MapServer/0');
+----
+<REGEX>:.*truncated.*
+
+# ============================================================ url = services directory
+
+statement ok
+ATTACH 'arcgis' AS dir (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services/', precision 2);
+
+# One schema per feature service; the MapServer twin, ImageServer and GeocodeServer are skipped.
+query T
+SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'dir' ORDER BY 1;
+----
+demo_parcels
+legacy
+main
+roads
+
+query TT
+SELECT schema_name, view_name FROM duckdb_views() WHERE database_name = 'dir' ORDER BY 1, 2;
+----
+demo_parcels	address_points
+demo_parcels	owners
+demo_parcels	tax_parcels
+legacy	old_points
+roads	road_centerlines
+
+# Views expose GEOMETRY and honour precision 2.
+query TT
+SELECT PARCEL_ID, ST_AsText(geometry) FROM dir.demo_parcels.tax_parcels WHERE FIPS = '51005';
+----
+C'1	POLYGON ((-77.12 37.99, -77.1 37.98, -77.1 38, -77.12 37.99))
+
+query TT
+SELECT PARCEL_ID, ST_GeometryType(geometry)::VARCHAR FROM dir.demo_parcels.tax_parcels ORDER BY 1;
+----
+A-1	POLYGON
+A-2	POLYGON
+B-1	POLYGON
+B-2	MULTIPOLYGON
+C'1	POLYGON
+
+# A polygon with a hole keeps it.
+query R
+SELECT ST_Area(geometry) FROM dir.demo_parcels.tax_parcels WHERE PARCEL_ID = 'B-1';
+----
+8.0
+
+# Esri-JSON-only layer: the worker reshapes the geometry.
+query TT
+SELECT ADDRESS, ST_AsText(geometry) FROM dir.demo_parcels.address_points WHERE ZIP = '22901' ORDER BY 1;
+----
+1 Main St	POINT (-78.5 38.03)
+3 Elm Rd	POINT (-78.48 38.01)
+
+# A table: no geometry column.
+query I
+SELECT count(*) FROM duckdb_columns() WHERE database_name = 'dir' AND table_name = 'owners' AND column_name = 'geometry';
+----
+0
+
+query TT
+SELECT PARCEL_ID, OWNER FROM dir.demo_parcels.owners ORDER BY 1;
+----
+A-1	Smith
+A-2	Jones
+B-1	NULL
+
+# Offset paging (no orderBy support) and a spatial join across schemas.
+query TT
+SELECT NAME, ST_AsText(geometry) FROM dir.roads.road_centerlines ORDER BY 1;
+----
+Main St	LINESTRING (0 0, 1 1)
+Oak Ave	LINESTRING (2 2, 3 3, 4 3)
+Route 29	MULTILINESTRING ((0 0, 0 5), (0 6, 0 9))
+
+query TT
+SELECT r.NAME, p.PARCEL_ID FROM dir.roads.road_centerlines r JOIN dir.demo_parcels.tax_parcels p
+ON ST_Intersects(r.geometry, p.geometry) ORDER BY 1, 2;
+----
+Main St	A-1
+Main St	A-2
+Oak Ave	B-1
+Route 29	A-1
+Route 29	B-1
+
+# ============================================================ url = one service, one layer, a folder
+
+statement ok
+ATTACH 'arcgis' AS svc (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer');
+
+query TT
+SELECT schema_name, view_name FROM duckdb_views() WHERE database_name = 'svc' ORDER BY 1, 2;
+----
+main	address_points
+main	owners
+main	tax_parcels
+
+query I
+SELECT count(*) FROM svc.main.tax_parcels WHERE FIPS = '51003';
+----
+2
+
+statement ok
+ATTACH 'arcgis' AS lyr (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services/Roads/MapServer/0?f=json');
+
+query TI
+SELECT view_name, (SELECT count(*) FROM lyr.main.road_centerlines) FROM duckdb_views() WHERE database_name = 'lyr';
+----
+road_centerlines	3
+
+statement ok
+ATTACH 'arcgis' AS fld (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services/Demo');
+
+query T
+SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'fld' ORDER BY 1;
+----
+demo_parcels
+main
+
+# ============================================================ bad ATTACH options
+
+statement error
+ATTACH 'arcgis' AS bad1 (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url 'https://example.com/datasets/parcels');
+----
+<REGEX>:.*unsupported ArcGIS URL.*
+
+statement error
+ATTACH 'arcgis' AS bad2 (TYPE vgi, LOCATION '{ARCGIS_WORKER}', precision 16);
+----
+<REGEX>:.*precision.*
