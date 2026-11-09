@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Query ArcGIS REST feature services (FeatureServer/MapServer) from DuckDB as SQL tables, via VGI.",

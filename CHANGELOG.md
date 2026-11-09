@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- VGI protocol 3.2: built on @query-farm/vgi 0.49.1, so the worker loads in the current
+  vgi extension (Haybarn 2.0.0rc11 community build 7d716ef). Workers on protocol 3.1 are
+  rejected by it. No behaviour changes.
+
+Targets: @query-farm/vgi 0.49 · VGI protocol 3.2 · Haybarn 2.0.0rc11 and DuckDB 2.0.0.
+
 ## 0.2.0
 
 Breaking: some schema and view names change.
