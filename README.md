@@ -5,9 +5,10 @@
 # vgi-arcgis
 
 Query ArcGIS REST feature services from DuckDB with SQL. Point the worker at an ArcGIS
-services directory, a FeatureServer/MapServer, or a single layer, and each layer becomes a
-DuckDB view with typed columns and a `GEOMETRY` column. Filters on attributes and spatial
-filters such as `ST_Intersects(geometry, <area>)` run on the ArcGIS server.
+services directory, a FeatureServer/MapServer, a single layer, or an ArcGIS Hub / Open Data
+site or dataset page, and each layer becomes a DuckDB view with typed columns and a
+`GEOMETRY` column. Filters on attributes and spatial filters such as
+`ST_Intersects(geometry, <area>)` run on the ArcGIS server.
 
 ```sql
 INSTALL spatial; LOAD spatial;   -- for the ST_ functions; reading the views needs no extension
@@ -42,10 +43,50 @@ What the `url` points at decides the layout:
 | A services directory, e.g. `…/arcgis/rest/services`, or a folder in it | One schema per FeatureServer/MapServer (folder `/` becomes `_`), one view per layer and table. |
 | A service, `…/FeatureServer` or `…/MapServer` | One view per layer and table, in `main`. |
 | A layer, `…/FeatureServer/0` | One view in `main`. |
+| An ArcGIS Hub / Open Data site, e.g. `https://gis.data.ca.gov` (any page of it that is not a dataset) | One schema per feature or map service in the site's catalog, one view per layer and table. |
+| A Hub dataset page, e.g. `https://<site>/datasets/<itemId>_0` | Resolved to the REST layer or service behind it, then as above. |
 
 When a service has both a FeatureServer and a MapServer, the FeatureServer is used.
 Services are listed when you attach; each schema's views are fetched the first time you use
 them.
+
+### ArcGIS Hub and Open Data sites
+
+```sql
+ATTACH 'arcgis' AS ca (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis-worker',
+                       url 'https://gis.data.ca.gov');
+SELECT count(*) FROM ca.caltrans_districts.district_tiger_lines;   -- 12
+```
+
+A site URL works like a services directory. The worker looks the host up in the Hub API
+(custom domains, `*.hub.arcgis.com` and `*.opendata.arcgis.com` all work), reads the site's
+catalog groups, and lists the Feature Service and Map Service items shared to them. Each
+service becomes a schema named after the item title. Items that point at the same service, or
+at a FeatureServer and its MapServer twin, are listed once (FeatureServer first). The schema
+comment is the title and summary, and the tags carry `arcgis.service_url` and
+`arcgis.item_id`. Duplicate titles are qualified by the item owner, then by the item ID.
+Items without a REST URL (web apps, files, StoryMaps) are skipped. The California State
+Geoportal lists about 2,000 schemas in a second or two. The listing is cached for 5 minutes,
+and views are fetched per schema the first time you use it. A service that is secured,
+moved or down shows up as a schema with no views, and the worker logs a warning.
+
+Dataset pages resolve to the REST URL behind them, both in ATTACH and in `arcgis_query`:
+
+| Dataset URL | Resolved through |
+|---|---|
+| `…/datasets/<itemId>_<n>` (also `/maps/…`, `/items/…`, with `/about`, `/explore`, … suffixes) | The Hub dataset API, giving layer `<n>`. |
+| `…/datasets/<itemId>` | The item's service URL. |
+| `…/datasets/<orgKey>::<slug>`, `…/datasets/<slug>` | The site's search, matching the slug against item titles. When several match, the org key (or the site's own org) decides. If it's still ambiguous, the error lists the candidates. |
+
+```sql
+SELECT count(*) FROM arcgis.main.arcgis_query(
+  'https://gis.data.ca.gov/datasets/CALTRANS::caltrans-districts');                    -- 12
+```
+
+The Hub and portal API roots can be overridden with the `ARCGIS_HUB_API` (default
+`https://hub.arcgis.com`) and `ARCGIS_PORTAL_API` (default
+`https://www.arcgis.com/sharing/rest`) environment variables of the worker process. The
+tests use these to point at the mock.
 
 ### Names
 
@@ -164,8 +205,15 @@ metadata is cached for 5 minutes.
 - **Public services only.** Token-secured services are not supported yet. In a directory,
   a service that requires a token (ArcGIS error 498/499, HTTP 401/403) appears as a schema
   with no views, and the worker logs a warning.
-- **ArcGIS REST URLs only.** ArcGIS Hub / Open Data site URLs are rejected. Use the REST
-  services directory behind the site; Hub datasets point at those layers.
+- **Hub sites:** only catalogs defined by groups are read (current `catalogV2` sites and
+  older `catalog.groups` sites). The search API stops at 10,000 items. Slug URLs are matched
+  against item titles because no public API resolves slugs. If one fails, use the
+  `<itemId>_<n>` form or the REST URL. Other non-REST URLs are rejected unless their host
+  is a Hub site.
+- **Listing every view of a Hub site is slow.** `duckdb_views()`, `SHOW TABLES` and
+  `information_schema` walk every schema of every attached database. On a site with
+  thousands of services, that fetches the metadata of each one, from many different servers.
+  Query views by name, or attach a single dataset or service instead.
 - **Imagery and other services** (ImageServer, GeocodeServer, GPServer) are skipped.
 - **DuckDB 2.0 axis order.** Geometry is longitude/latitude. Spheroid functions such as
   `ST_Area_Spheroid` need `SET geometry_always_xy = true` (the default from DuckDB 2.1).
@@ -213,6 +261,8 @@ Stock DuckDB 2.0.0 (VGI from the `query_farm` repository) and Haybarn 2.0.0rc11:
 | NYS GIS (`gisservices.its.ny.gov`) | ArcGIS Server 10.81, 22 services | 62 counties, 141,343 km² |
 | USGS National Map (`index.nationalmap.gov`) | ArcGIS 11.3, index layers | 22 HU2 hydrologic regions |
 | Caltrans, a California State Geoportal (Hub) dataset, by its layer URL | ArcGIS Server | 12 districts |
+| [California State Geoportal](https://gis.data.ca.gov) (Hub site, custom domain) | ArcGIS Hub, `catalogV2`, 44 groups | 1,999 schemas; 12 Caltrans districts via the site schema, the `CALTRANS::caltrans-districts` slug and `<itemId>_0`; a CAL FIRE MapServer `<itemId>_0` dataset |
+| [DataHub DC](https://opendata.dc.gov) (Hub site) | ArcGIS Hub, `catalogV2`, 53 groups | 1,502 schemas |
 
 ## Testing
 
@@ -222,13 +272,16 @@ make check     # lint, unit tests, SQL tests over stdio/launch/HTTP, metadata li
 
 The SQL tests run against `test/mock_api/server.py`, an offline mock of the ArcGIS REST API.
 It covers paging modes, filters, multipolygons with holes, an Esri-JSON-only layer, a
-non-spatial table, a legacy server, and throttling (429 on first request). Nothing in
+non-spatial table, a legacy server, and throttling (429 on first request). It also mocks the
+ArcGIS Hub and sharing APIs: domain lookup, both site catalog formats, paged search, dataset
+IDs and the site search used for slugs. Nothing in
 `make check` touches the network.
 `vgi-agent-tests.yaml` holds live tasks against Virginia's VGIN services.
 
 `src/` layout: `catalog.ts` (ATTACH and views), `discovery.ts` (walking directories and
-services), `query.ts` (`arcgis_query`), `where.ts` (attribute filter translation),
-`spatial.ts` (spatial filter translation), `wkb.ts` (GeoJSON → WKB, WKB boxes), `esri.ts`
+services), `hub.ts` (Hub site and dataset URLs), `query.ts` (`arcgis_query`), `where.ts`
+(attribute filter translation), `spatial.ts` (spatial filter translation), `wkb.ts`
+(GeoJSON → WKB, WKB boxes), `esri.ts`
 (metadata, types, Esri JSON → GeoJSON), `http.ts` (retries, caching), `options.ts`.
 
 ## Support

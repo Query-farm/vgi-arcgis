@@ -19,7 +19,9 @@ export const ATTACH_OPTIONS: AttachOptionSpec[] = [
     name: "url",
     description:
       "ArcGIS REST URL to expose as tables: a services directory (.../arcgis/rest/services or a folder), " +
-      "a service (.../FeatureServer or .../MapServer) or a single layer (.../FeatureServer/0). " +
+      "a service (.../FeatureServer or .../MapServer) or a single layer (.../FeatureServer/0); " +
+      "or an ArcGIS Hub / Open Data site (https://<site>, one schema per service in its catalog) or " +
+      "one of its dataset pages (https://<site>/datasets/<id>, resolved to the REST layer or service). " +
       "Omit it to use only the arcgis_query() table function.",
     type: utf8(),
   },

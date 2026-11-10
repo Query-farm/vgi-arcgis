@@ -17,16 +17,9 @@
  */
 
 import { batchFromColumns, binary, defineTableFunction, field, schema, utf8 } from "@query-farm/vgi";
-import {
-  arrowType,
-  attributeFields,
-  classifyUrl,
-  esriToGeoJson,
-  GEOMETRY,
-  type LayerMeta,
-  supportsGeoJson,
-} from "./esri.ts";
+import { arrowType, attributeFields, esriToGeoJson, GEOMETRY, type LayerMeta, supportsGeoJson } from "./esri.ts";
 import { ArcgisError, getJson, getMetadata } from "./http.ts";
+import { resolveUrl } from "./hub.ts";
 import { log } from "./log.ts";
 import { column, objectTags } from "./meta.ts";
 import { decodeSettings } from "./options.ts";
@@ -52,11 +45,18 @@ interface QueryState {
 
 type PagingMode = "keyset" | "offset" | "single";
 
-/** Fetch and check a layer's metadata. @throws Error if the URL is not a layer. */
+/**
+ * Fetch and check a layer's metadata; an ArcGIS Hub dataset URL is resolved
+ * to its layer first (cached). @throws Error if the URL is not a layer.
+ */
 export async function layerMeta(url: string): Promise<{ url: string; meta: LayerMeta }> {
-  const target = classifyUrl(url);
+  const target = await resolveUrl(url);
   if (target.kind !== "layer") {
-    throw new Error(`arcgis_query needs a layer URL ending in /FeatureServer/<id> or /MapServer/<id>, got '${url}'`);
+    throw new Error(
+      "arcgis_query needs a layer URL ending in /FeatureServer/<id> or /MapServer/<id>, or an ArcGIS Hub " +
+        `dataset URL for one layer (.../datasets/<itemId>_<id>), got '${url}'` +
+        (target.kind === "service" ? ` (a whole service, ${target.url})` : ""),
+    );
   }
   const meta = (await getMetadata(`${target.url}?f=json`)) as LayerMeta;
   if (!Array.isArray(meta.fields)) throw new ArcgisError(`${target.url} has no field list; is it a feature layer?`);
@@ -126,9 +126,13 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
   argDocs: {
     url:
       "Layer or table URL, e.g. 'https://host/arcgis/rest/services/Folder/Name/FeatureServer/0'. " +
+      "Also accepts an ArcGIS Hub / Open Data dataset page for one layer, e.g. " +
+      "'https://gis.data.ca.gov/datasets/<itemId>_0' or '.../datasets/<orgKey>::<slug>'. " +
       "Query strings are ignored.",
   },
-  argConstraints: { url: { pattern: "^https?://.+/(FeatureServer|MapServer)/[0-9]+/?$" } },
+  argConstraints: {
+    url: { pattern: "^https?://(.+/(FeatureServer|MapServer)/[0-9]+/?$|[^/]+/(datasets|maps|items)/[^/?#]+)" },
+  },
   filterPushdown: true,
   projectionPushdown: true,
   // `geometry && <constant>` (bounding boxes intersect): sent to ArcGIS as an
@@ -265,7 +269,9 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
         "arcgis, esri, feature service, featureserver, mapserver, gis, geojson, rest api, layer, query, geospatial",
       docLlm:
         "Read every feature of one ArcGIS REST layer or table at `url` (ending in /FeatureServer/<id> or " +
-        "/MapServer/<id>). The result columns depend on the layer: one column per attribute field, typed from " +
+        "/MapServer/<id>). An ArcGIS Hub / Open Data dataset page URL for one layer also works " +
+        "(`https://<site>/datasets/<itemId>_<id>` or `.../datasets/<orgKey>::<slug>`); it is resolved to the " +
+        "layer's REST URL first. The result columns depend on the layer: one column per attribute field, typed from " +
         "the layer metadata (object ids and integers as `INTEGER`, small integers as `SMALLINT`, doubles as " +
         "`DOUBLE`, dates as `TIMESTAMP_MS`, strings and GUIDs as `VARCHAR`). Layers with geometry add " +
         "`geometry` (`GEOMETRY`), WGS84 longitude/latitude rounded to the ATTACH `precision` (default 7 " +
@@ -279,6 +285,8 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
       docMd:
         "## arcgis_query(url)\n\n" +
         "Every feature of one ArcGIS FeatureServer/MapServer layer or table, paged automatically.\n\n" +
+        "- `url` is a layer URL (`.../FeatureServer/0`) or an ArcGIS Hub dataset page for one layer " +
+        "(`https://<site>/datasets/<itemId>_0`).\n" +
         "- Attribute fields become typed columns; the set of columns depends on the layer.\n" +
         "- Layers with geometry add `geometry` (`GEOMETRY`, WGS84 longitude/latitude).\n" +
         "- Simple attribute filters and spatial filters against a constant (`&&`, `ST_Intersects`, `ST_Within`, " +
