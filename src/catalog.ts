@@ -18,6 +18,7 @@ import {
   type VgiFunction,
   type ViewInfo,
 } from "@query-farm/vgi";
+import { ARCGIS_SECRET_TYPE, ArcgisAuth, assertSecureTransport, attachAuth, credentialsFrom } from "./auth.ts";
 import { type DiscoveredView, directorySchemas, mainViews, serviceViews } from "./discovery.ts";
 import { classifyUrl } from "./esri.ts";
 import { CATALOG_DOC_MD, CATALOG_NAME, CATALOG_TAGS, SCHEMA_DOC_MD, SCHEMA_TAGS, SOURCE_URL } from "./meta.ts";
@@ -50,6 +51,7 @@ export const CATALOG: CatalogDescriptor = {
   sourceUrl: SOURCE_URL,
   tags: CATALOG_TAGS,
   attachOptions: ATTACH_OPTIONS,
+  secretTypes: [ARCGIS_SECRET_TYPE],
   schemas: [
     {
       path: ["main"],
@@ -90,17 +92,25 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
     super(CATALOG, registry, { perAttachItemIds: true });
   }
 
-  override attach(
+  override async attach(
     name: string,
     options?: Record<string, unknown>,
     dataVersionSpec?: string | null,
     implementationVersion?: string | null,
     clientCapabilities?: Uint8Array | null,
-  ): CatalogAttachResult {
+  ): Promise<CatalogAttachResult> {
     const settings = settingsFromOptions(options ?? {});
     if (settings.url) settings.url = classifyUrl(settings.url).url; // validate early, store normalized
-    const base = super.attach(name, options, dataVersionSpec, implementationVersion, clientCapabilities);
-    return { ...(base as CatalogAttachResult), attach_opaque_data: encodeSettings(settings) };
+    // Credentials stay out of encodeSettings: the SDK carries the secret
+    // options, encrypted, and attachOptions() reads them back (auth.ts).
+    const creds = credentialsFrom(options ?? {}, "ATTACH option");
+    if (creds && settings.url) {
+      assertSecureTransport(settings.url, "ArcGIS credentials");
+      // Fail the ATTACH on a wrong password rather than on the first query.
+      if (creds.kind !== "token") await new ArcgisAuth(creds, "attach").token(settings.url);
+    }
+    const base = await super.attach(name, options, dataVersionSpec, implementationVersion, clientCapabilities);
+    return { ...base, attach_opaque_data: encodeSettings(settings) };
   }
 
   /** `main` (functions, plus views for a service/layer url) and one schema per service for a directory url. */
@@ -115,7 +125,7 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
     };
     const target = classifyUrl(url);
     if (target.kind !== "directory") return base.map(unknownViews);
-    const discovered = await directorySchemas(target.url);
+    const discovered = await directorySchemas(target.url, attachAuth(attach, target.url));
     return [
       ...base,
       ...discovered.map((s) =>
@@ -156,12 +166,14 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
   ): Promise<ViewInfo[]> {
     const { url } = decodeSettings(attach);
     if (!url) return [];
-    if (isMain(path)) return (await mainViews(url)).map((v) => toViewInfo(v, path));
+    // Catalog hooks get no DuckDB secrets: only ATTACH credentials apply here.
+    const auth = attachAuth(attach, url);
+    if (isMain(path)) return (await mainViews(url, auth)).map((v) => toViewInfo(v, path));
     const target = classifyUrl(url);
     if (target.kind !== "directory") return [];
-    const schema = (await directorySchemas(target.url)).find((s) => s.name === path[0]?.toLowerCase());
+    const schema = (await directorySchemas(target.url, auth)).find((s) => s.name === path[0]?.toLowerCase());
     if (!schema || path.length !== 1) return [];
-    return (await serviceViews(schema.serviceUrl)).map((v) => toViewInfo(v, path));
+    return (await serviceViews(schema.serviceUrl, auth)).map((v) => toViewInfo(v, path));
   }
 
   override async viewGet(

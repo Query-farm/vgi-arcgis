@@ -13,7 +13,7 @@
  */
 
 import { classifyUrl, type DirectoryMeta, GEOMETRY_GEOJSON, type LayerMeta, type ServiceMeta } from "./esri.ts";
-import { getMetadata, isAuthError } from "./http.ts";
+import { getMetadata, isAuthError, type RequestAuth } from "./http.ts";
 import { log } from "./log.ts";
 import { assignNames, sqlName } from "./naming.ts";
 
@@ -47,14 +47,16 @@ export function viewDefinition(layerUrl: string, hasGeometry: boolean): string {
 
 const FEATURE_SERVICE_TYPES = ["FeatureServer", "MapServer"];
 
-/** Schemas for a services directory (the root or one folder). */
-export async function directorySchemas(dirUrl: string): Promise<DiscoveredSchema[]> {
+/** Schemas for a services directory (the root or one folder). `auth`: the ATTACH credentials, if any. */
+export async function directorySchemas(dirUrl: string, auth?: RequestAuth | null): Promise<DiscoveredSchema[]> {
   const root = dirUrl.replace(/(\/rest\/services)(\/[^/]+)?$/i, "$1");
-  const top = (await getMetadata(`${dirUrl}?f=json`)) as DirectoryMeta;
+  const top = (await getMetadata(`${dirUrl}?f=json`, auth)) as DirectoryMeta;
   const listings = [top];
   if (dirUrl === root) {
     const folders = await Promise.all(
-      (top.folders ?? []).map((f) => getMetadata(`${root}/${encodeURIComponent(f)}?f=json`) as Promise<DirectoryMeta>),
+      (top.folders ?? []).map(
+        (f) => getMetadata(`${root}/${encodeURIComponent(f)}?f=json`, auth) as Promise<DirectoryMeta>,
+      ),
     );
     listings.push(...folders);
   }
@@ -79,16 +81,17 @@ export async function directorySchemas(dirUrl: string): Promise<DiscoveredSchema
 
 /**
  * Views for every feature layer and table of a service. A service that needs a
- * token has none: one subscriber-only service must not break listing (or
- * DuckDB's "did you mean" search over) every other service in a directory.
+ * token the attach does not have (or rejects it) has none: one subscriber-only
+ * service must not break listing (or DuckDB's "did you mean" search over)
+ * every other service in a directory.
  */
-export async function serviceViews(serviceUrl: string): Promise<DiscoveredView[]> {
+export async function serviceViews(serviceUrl: string, auth?: RequestAuth | null): Promise<DiscoveredView[]> {
   let meta: ServiceMeta;
   try {
-    meta = (await getMetadata(`${serviceUrl}?f=json`)) as ServiceMeta;
+    meta = (await getMetadata(`${serviceUrl}?f=json`, auth)) as ServiceMeta;
   } catch (err) {
     if (!isAuthError(err)) throw err;
-    log.warn(`skipping ${serviceUrl}: ${(err as Error).message} (token-secured services are not supported)`);
+    log.warn(`skipping ${serviceUrl}: ${(err as Error).message}`);
     return [];
   }
   const description = (meta.serviceDescription || meta.description || "").replace(/<[^>]+>/g, "").trim();
@@ -130,7 +133,7 @@ export async function serviceViews(serviceUrl: string): Promise<DiscoveredView[]
     entries
       .filter((e) => !e.isTable && e.geometryType === undefined)
       .map(async (e) => {
-        const layer = (await getMetadata(`${serviceUrl}/${e.id}?f=json`)) as LayerMeta;
+        const layer = (await getMetadata(`${serviceUrl}/${e.id}?f=json`, auth)) as LayerMeta;
         e.geometryType = layer.geometryType ?? null;
       }),
   );
@@ -152,8 +155,8 @@ export async function serviceViews(serviceUrl: string): Promise<DiscoveredView[]
 }
 
 /** The single view for a layer URL. */
-export async function layerViews(layerUrl: string): Promise<DiscoveredView[]> {
-  const meta = (await getMetadata(`${layerUrl}?f=json`)) as LayerMeta;
+export async function layerViews(layerUrl: string, auth?: RequestAuth | null): Promise<DiscoveredView[]> {
+  const meta = (await getMetadata(`${layerUrl}?f=json`, auth)) as LayerMeta;
   const hasGeometry = Boolean(meta.geometryType);
   const name = meta.name ?? "layer";
   return [
@@ -170,9 +173,9 @@ export async function layerViews(layerUrl: string): Promise<DiscoveredView[]> {
 }
 
 /** Views that belong in `main` for an ATTACH url (service and layer URLs). */
-export async function mainViews(url: string): Promise<DiscoveredView[]> {
+export async function mainViews(url: string, auth?: RequestAuth | null): Promise<DiscoveredView[]> {
   const target = classifyUrl(url);
-  if (target.kind === "service") return serviceViews(target.url);
-  if (target.kind === "layer") return layerViews(target.url);
+  if (target.kind === "service") return serviceViews(target.url, auth);
+  if (target.kind === "layer") return layerViews(target.url, auth);
   return [];
 }

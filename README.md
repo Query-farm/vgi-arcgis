@@ -27,13 +27,17 @@ service live.
 ## Attaching
 
 ```sql
-ATTACH 'arcgis' AS <name> (TYPE vgi, LOCATION '<worker>' [, url '<arcgis url>'] [, precision <n>]);
+ATTACH 'arcgis' AS <name> (TYPE vgi, LOCATION '<worker>' [, url '<arcgis url>'] [, precision <n>]
+                           [, token '...' | , username '...', password '...' | , client_id '...', client_secret '...']);
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
 | `url` | none | What to expose as views (see below). Omit it to use only `arcgis_query()`. |
 | `precision` | `7` | Decimal places kept in returned coordinates (ArcGIS `geometryPrecision`), 0–15. 7 is about 1 cm in longitude/latitude; lower values make responses smaller. |
+| `token` | none | A pre-generated ArcGIS token for token-secured services. See [Authentication](#authentication). |
+| `username`, `password` | none | An ArcGIS user; the worker generates and renews tokens. |
+| `client_id`, `client_secret` | none | An ArcGIS OAuth app (client-credentials flow); the worker gets and renews app tokens. |
 
 What the `url` points at decides the layout:
 
@@ -90,6 +94,58 @@ It returns the layer's attribute fields, plus `geometry_geojson` (VARCHAR, WGS84
 layers with geometry. Parse that with `ST_GeomFromGeoJSON(geometry_geojson)`. The views
 already do this, which is why views need the `spatial` and `json` extensions loaded.
 
+## Authentication
+
+Services that need an ArcGIS token answer error 499 ("Token Required") or 498 ("Invalid
+Token"). There are two ways to give the worker credentials.
+
+**ATTACH options** apply to the server of the ATTACH `url` (the same scheme, host and port),
+or to every URL when you attach without a `url`. They also make a secured directory list its
+secured services as views. Give one of:
+
+| Options | What happens |
+|---|---|
+| `token` | Sent as is. Not renewed: when it expires, attach again. Generate it with `client=requestip`, or with `referer` `https://github.com/Query-farm/vgi-arcgis`, which the worker sends as its `Referer`. |
+| `username`, `password` | Exchanged for a 60-minute token at the server's token service (`authInfo.tokenServicesUrl` from `<server>/rest/info`: `…/arcgis/tokens/generateToken` on ArcGIS Server, `…/sharing/rest/generateToken` on a portal or ArcGIS Online). A wrong password fails the ATTACH. |
+| `client_id`, `client_secret` | An ArcGIS OAuth app's client-credentials flow at the portal's `/sharing/rest/oauth2/token` (ArcGIS Online for `services.arcgis.com` hosts). Needs ArcGIS Online or an ArcGIS Enterprise portal. |
+
+```sql
+ATTACH 'arcgis' AS gis (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis-worker',
+                        url 'https://gis.example.gov/arcgis/rest/services',
+                        username 'analyst', password getenv('ARCGIS_PASSWORD'));
+```
+
+`getenv()` (DuckDB CLI) keeps the value out of the SQL text and your shell history. The
+options are declared secret: `duckdb_databases()` shows `<redacted>`, and the VGI SDK carries
+them encrypted inside the attach value, never in plaintext.
+
+**A DuckDB secret** of type `arcgis` is used by `arcgis_query` for URLs under its `SCOPE`;
+the longest matching scope wins. It takes `TOKEN`, or `USERNAME` and `PASSWORD`, or
+`CLIENT_ID` and `CLIENT_SECRET`. The type exists once the worker is attached:
+
+```sql
+ATTACH 'arcgis' (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis-worker');
+CREATE SECRET gis (TYPE arcgis, TOKEN getenv('ARCGIS_TOKEN'),
+                   SCOPE 'https://gis.example.gov/arcgis/rest/services/');
+SELECT count(*) FROM arcgis.main.arcgis_query(
+  'https://gis.example.gov/arcgis/rest/services/Utilities/Water/FeatureServer/0');
+```
+
+Always give the secret a `SCOPE`: one without applies to every URL. Catalog listings can't
+read secrets, so a secured service in an attached directory has views only with ATTACH
+credentials; `arcgis_query` works with either. When both apply, the ATTACH credentials win.
+
+How credentials are handled:
+
+- Generated tokens stay in the worker's memory, keyed by token endpoint and a hash of the
+  identity. They are renewed two minutes before they expire, and once more if the server
+  answers 498. They never go into query state, logs or error messages: URLs are logged
+  and reported with `token=<redacted>`.
+- Credentials are sent only over HTTPS (plain HTTP is allowed to `localhost` only).
+- Cached metadata is keyed by identity, so a shared HTTP worker never serves one attach's
+  secured metadata to another.
+- Web-tier authentication (IWA, PKI) and interactive OAuth sign-in are not supported.
+
 ## Columns and types
 
 | ArcGIS field type | DuckDB type |
@@ -137,9 +193,10 @@ metadata is cached for 5 minutes.
 
 ## Limitations
 
-- **Public services only.** Token-secured services are not supported yet. In a directory,
-  a service that requires a token (ArcGIS error 498/499, HTTP 401/403) appears as a schema
-  with no views, and the worker logs a warning.
+- **Token-secured services need credentials** (see [Authentication](#authentication)). In
+  a directory attached without them, or whose credentials a service rejects (ArcGIS error
+  498/499, HTTP 401/403), that service appears as a schema with no views and the worker
+  logs a warning. Web-tier (IWA/PKI) authentication is not supported.
 - **ArcGIS REST URLs only.** ArcGIS Hub / Open Data site URLs are rejected. Use the REST
   services directory behind the site; Hub datasets point at those layers.
 - **No spatial pushdown** (see above).

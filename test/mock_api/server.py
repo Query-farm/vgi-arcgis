@@ -11,6 +11,14 @@ Directory
 ``GET /arcgis/rest/services/<svc>/<Type>?f=json``    service: layers + tables
 ``GET /arcgis/rest/services/<svc>/<Type>/<id>?f=json``   layer metadata
 ``GET /arcgis/rest/services/<svc>/<Type>/<id>/query``    query
+``GET /arcgis/rest/info?f=json``                     server info: ``authInfo.tokenServicesUrl``
+
+Token service (a federated server: its tokens come from a portal)
+-----------------------------------------------------------------
+``POST /portal/sharing/rest/generateToken``    ``username``/``password`` (+ ``client=referer``) -> token
+``POST /portal/sharing/rest/oauth2/token``     ``client_credentials`` grant -> ``access_token``
+
+Every credential here is fake and exists only in this file.
 
 Services
 --------
@@ -21,8 +29,13 @@ Services
 * ``Demo/Imagery`` ImageServer (not a feature service; skipped).
 * ``3DEPIndex`` MapServer: "1 meter" under group "DEM Product Index" and
   "1 Meter" under group "Query" (duplicate names told apart by group).
-* ``Secured`` FeatureServer that answers every request with error 499 "Token
-  Required" (a subscriber-only service; listed with no views).
+* ``Secured`` FeatureServer: layer 0 ``Restricted Sites`` (points). Without a
+  token it answers error 499 "Token Required", with a bad or expired one 498
+  "Invalid Token". Accepted tokens: ``STATIC_TOKEN``, and tokens issued by the
+  token service, which must come with the ``Referer`` they were generated
+  for. ``EXPIRED_TOKEN`` is always rejected with 498. An issued token is
+  revoked after ``TOKEN_USES`` requests although its advertised ``expires``
+  is an hour away, so the worker's renew-on-498 path runs in every scan.
 * ``Roads`` MapServer: layer 0 ``Road Centerlines`` (polylines) with no
   ``orderBy`` support but ``resultOffset`` paging.
 * ``Legacy`` MapServer: layer 0 ``Old Points`` with neither ordering nor
@@ -42,6 +55,8 @@ Test hooks
 * ``MOCK_API_FLAKY=1``: the first request for each distinct query URL gets a
   ``429`` with ``Retry-After: 0``, exercising the client's retry path.
 * ``GET /_log``: the ``where`` clauses received, most recent last.
+* ``GET /_auth_log``: how many tokens were issued (``generate``, ``oauth``) and
+  how many secured requests were rejected (``rejected``).
 * ``GET /health``: ``{"status": "ok"}``.
 
 Usage::
@@ -58,11 +73,19 @@ import os
 import re
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 MAX_RECORDS = 2
 DAY_MS = 86_400_000
+
+# Fake credentials for the secured service. Never real ones.
+STATIC_TOKEN = "fake-static-token"
+EXPIRED_TOKEN = "fake-expired-token"
+USERS = {"test-user": "not-a-real-password"}
+CLIENTS = {"test-client-id": "not-a-real-client-secret"}
+TOKEN_USES = 4
 
 PARCEL_FIELDS = [
     {"name": "OBJECTID", "type": "esriFieldTypeOID"},
@@ -110,6 +133,11 @@ ROAD_FIELDS = [
 ]
 ROADS = [(1, "Main St", 25, [[[0, 0], [1, 1]]]), (2, "Route 29", 55, [[[0, 0], [0, 5]], [[0, 6], [0, 9]]]),
          (3, "Oak Ave", 25, [[[2, 2], [3, 3], [4, 3]]])]
+
+SITE_FIELDS = [{"name": "OBJECTID", "type": "esriFieldTypeOID"}, {"name": "SITE", "type": "esriFieldTypeString"},
+               {"name": "STATUS", "type": "esriFieldTypeString"}]
+SITES = [(1, "North Gate", "open", (-77.0, 38.9)), (2, "Vault", "closed", (-77.01, 38.91)),
+         (3, "Annex", "open", (-77.02, 38.92))]
 
 LEGACY_FIELDS = [{"name": "OBJECTID", "type": "esriFieldTypeOID"}, {"name": "KIND", "type": "esriFieldTypeString"}]
 LEGACY = [(1, "a", (0, 0)), (2, "b", (1, 1)), (3, "b", (2, 2))]
@@ -189,6 +217,13 @@ SERVICES = {
     ("Roads", "MapServer"): {
         "layers": {0: (_layer(0, "Road Centerlines", "Feature Layer", ROAD_FIELDS, "esriGeometryPolyline",
                               ",".join(GJ), order_by=False, pagination=True), _road_features())},
+        "tables": {},
+    },
+    ("Secured", "FeatureServer"): {
+        "layers": {0: (_layer(0, "Restricted Sites", "Feature Layer", SITE_FIELDS, "esriGeometryPoint",
+                              ",".join(GJ)),
+                       [({"OBJECTID": o, "SITE": n, "STATUS": st}, {"x": p[0], "y": p[1]},
+                         {"type": "Point", "coordinates": list(p)}) for o, n, st, p in SITES])},
         "tables": {},
     },
     ("Legacy", "MapServer"): {
@@ -397,6 +432,9 @@ def matches(where: str, row: dict) -> bool:
 _flaky_seen: set[str] = set()
 _lock = threading.Lock()
 WHERE_LOG: list[str] = []
+# Issued token -> (Referer it is bound to or None, requests left).
+ISSUED: dict[str, list] = {}
+AUTH_LOG = {"generate": 0, "oauth": 0, "rejected": 0}
 
 
 def _round(obj, digits):
@@ -430,6 +468,56 @@ class Handler(BaseHTTPRequestHandler):
         # ArcGIS reports errors with HTTP 200 and an error object.
         self._send(200, {"error": {"code": code, "message": message, "details": []}})
 
+    def _token_error(self, q: dict) -> tuple[int, str] | None:
+        """None when the request carries a token the secured service accepts."""
+        token = q.get("token")
+        if not token:
+            return 499, "Token Required"
+        if token == STATIC_TOKEN:
+            return None
+        with _lock:
+            entry = ISSUED.get(token)
+            if entry is None or entry[1] <= 0 or (entry[0] and self.headers.get("Referer") != entry[0]):
+                return 498, "Invalid Token"
+            entry[1] -= 1
+        return None
+
+    def do_POST(self) -> None:
+        """The token service: generateToken and oauth2/token."""
+        url = urlparse(self.path)
+        length = int(self.headers.get("Content-Length") or 0)
+        form = {k: v[-1] for k, v in parse_qs(self.rfile.read(length).decode()).items()}
+        if url.path == "/portal/sharing/rest/generateToken":
+            if USERS.get(form.get("username", "")) != form.get("password") or "password" not in form:
+                self._send(200, {"error": {"code": 400, "message": "Unable to generate token.",
+                                           "details": ["Invalid username or password."]}})
+                return
+            referer = form.get("referer") if form.get("client") == "referer" else None
+            with _lock:
+                AUTH_LOG["generate"] += 1
+                token = f"mock-user-token-{AUTH_LOG['generate']}"
+                ISSUED[token] = [referer, TOKEN_USES]
+            minutes = int(form.get("expiration", "60"))
+            self._send(200, {"token": token, "expires": int(time.time() * 1000) + minutes * 60_000, "ssl": False})
+            return
+        if url.path == "/portal/sharing/rest/oauth2/token":
+            if form.get("grant_type") != "client_credentials":
+                self._send(200, {"error": {"code": 400, "error": "unsupported_grant_type",
+                                           "message": "Unsupported grant type", "details": []}})
+                return
+            if CLIENTS.get(form.get("client_id", "")) != form.get("client_secret"):
+                self._send(200, {"error": {"code": 400, "error": "invalid_client",
+                                           "error_description": "Invalid client_id or client_secret",
+                                           "message": "Invalid client_id or client_secret", "details": []}})
+                return
+            with _lock:
+                AUTH_LOG["oauth"] += 1
+                token = f"mock-app-token-{AUTH_LOG['oauth']}"
+                ISSUED[token] = [None, TOKEN_USES]
+            self._send(200, {"access_token": token, "expires_in": 7200})
+            return
+        self._send(404, {"error": "not found"})
+
     def do_GET(self) -> None:  # noqa: C901, PLR0911, PLR0912 - one small router
         """Route a GET request."""
         url = urlparse(self.path)
@@ -440,6 +528,16 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/_log":
             with _lock:
                 self._send(200, {"where": list(WHERE_LOG)})
+            return
+        if url.path == "/_auth_log":
+            with _lock:
+                self._send(200, dict(AUTH_LOG))
+            return
+        if url.path == "/arcgis/rest/info":
+            base = f"http://{self.headers.get('Host')}"
+            self._send(200, {"currentVersion": 11.3, "owningSystemUrl": f"{base}/portal",
+                             "authInfo": {"isTokenBasedSecurity": True,
+                                          "tokenServicesUrl": f"{base}/portal/sharing/rest/generateToken"}})
             return
         if os.environ.get("MOCK_API_FLAKY") == "1":
             with _lock:
@@ -456,9 +554,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"currentVersion": 11.3, **DIRECTORY[rest]})
             return
         if rest.startswith("Secured/"):
-            # A subscriber-only service: ArcGIS answers 499 without a token.
-            self._error("Token Required", 499)
-            return
+            # A subscriber-only service: 499 without a token, 498 for a bad one.
+            failure = self._token_error(q)
+            if failure:
+                with _lock:
+                    AUTH_LOG["rejected"] += 1
+                self._error(failure[1], failure[0])
+                return
         m = re.fullmatch(r"(.+)/(FeatureServer|MapServer)(?:/(\d+))?(/query)?", rest)
         if not m or (m.group(1), m.group(2)) not in SERVICES:
             self._error("Service not found", 404)

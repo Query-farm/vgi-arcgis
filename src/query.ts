@@ -15,6 +15,7 @@
  */
 
 import { batchFromColumns, defineTableFunction, schema, utf8 } from "@query-farm/vgi";
+import { resolveAuth, secretLookup } from "./auth.ts";
 import {
   arrowType,
   attributeFields,
@@ -24,7 +25,7 @@ import {
   type LayerMeta,
   supportsGeoJson,
 } from "./esri.ts";
-import { ArcgisError, getJson, getMetadata } from "./http.ts";
+import { ArcgisError, getJson, getMetadata, isAuthError, type RequestAuth } from "./http.ts";
 import { log } from "./log.ts";
 import { column, objectTags } from "./meta.ts";
 import { decodeSettings } from "./options.ts";
@@ -49,12 +50,12 @@ interface QueryState {
 type PagingMode = "keyset" | "offset" | "single";
 
 /** Fetch and check a layer's metadata. @throws Error if the URL is not a layer. */
-export async function layerMeta(url: string): Promise<{ url: string; meta: LayerMeta }> {
+export async function layerMeta(url: string, auth?: RequestAuth | null): Promise<{ url: string; meta: LayerMeta }> {
   const target = classifyUrl(url);
   if (target.kind !== "layer") {
     throw new Error(`arcgis_query needs a layer URL ending in /FeatureServer/<id> or /MapServer/<id>, got '${url}'`);
   }
-  const meta = (await getMetadata(`${target.url}?f=json`)) as LayerMeta;
+  const meta = (await getMetadata(`${target.url}?f=json`, auth)) as LayerMeta;
   if (!Array.isArray(meta.fields)) throw new ArcgisError(`${target.url} has no field list; is it a feature layer?`);
   return { url: target.url, meta };
 }
@@ -134,7 +135,21 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
   autoApplyFilters: true,
 
   onBind: async (params) => {
-    const { meta } = await layerMeta(params.args.url);
+    // First pass (unless ATTACH credentials apply): also ask DuckDB for the
+    // `arcgis` secret scoped to this URL; it re-binds with it. The schema is
+    // still real when the layer is public, for clients that bind only once.
+    const attach = params.bindCall.attach_opaque_data;
+    const lookup = secretLookup(attach, params.args.url, params.resolvedSecretsProvided);
+    let meta: LayerMeta;
+    try {
+      ({ meta } = await layerMeta(
+        params.args.url,
+        lookup ? null : resolveAuth(attach, params.secrets, params.args.url),
+      ));
+    } catch (err) {
+      if (lookup && isAuthError(err)) return { outputSchema: schema([]), ...lookup };
+      throw err;
+    }
     const columns = attributeFields(meta).map((f) =>
       column(f.name, arrowType(f.type) as NonNullable<ReturnType<typeof arrowType>>, f.alias || f.name),
     );
@@ -147,7 +162,7 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
         ),
       );
     }
-    return { outputSchema: schema(columns) };
+    return { outputSchema: schema(columns), ...lookup };
   },
 
   initialState: () => ({ lastOid: 0, started: false, offset: 0, pages: 0, done: false }),
@@ -157,7 +172,9 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
       out.finish();
       return;
     }
-    const { url, meta } = await layerMeta(params.args.url);
+    // Re-derived on every call: tokens never travel in the state.
+    const auth = resolveAuth(params.initCall.bind_call.attach_opaque_data, params.secrets, params.args.url);
+    const { url, meta } = await layerMeta(params.args.url, auth);
     const settings = decodeSettings(params.initCall.bind_call.attach_opaque_data);
     const fields = attributeFields(meta);
     const fieldTypes = new Map(fields.map((f) => [f.name, f.type]));
@@ -190,7 +207,7 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
     if (state.offset === 0)
       log.debug(`arcgis_query ${url}: mode=${mode} where=${where} outFields=${q.get("outFields")}`);
 
-    const body = (await getJson(`${url}/query?${q}`)) as {
+    const body = (await getJson(`${url}/query?${q}`, auth)) as {
       features?: ArcgisFeature[];
       exceededTransferLimit?: boolean;
       properties?: { exceededTransferLimit?: boolean };
