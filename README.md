@@ -140,9 +140,9 @@ so both push down the same filters.
 Services that need an ArcGIS token answer error 499 ("Token Required") or 498 ("Invalid
 Token"). There are two ways to give the worker credentials.
 
-**ATTACH options** apply to the server of the ATTACH `url` (the same scheme, host and port),
-or to every URL when you attach without a `url`. They also make a secured directory list its
-secured services as views. Give one of:
+**ATTACH options** apply only to the server of the ATTACH `url` (the same scheme, host and
+port), and need a `url`: without one they would be sent to any host a later `arcgis_query`
+names. They also make a secured directory list its secured services as views. Give one of:
 
 | Options | What happens |
 |---|---|

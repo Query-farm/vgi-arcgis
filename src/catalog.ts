@@ -120,6 +120,15 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
     // Credentials stay out of encodeSettings: the SDK carries the secret
     // options, encrypted, and attachOptions() reads them back (auth.ts).
     const creds = credentialsFrom(options ?? {}, "ATTACH option");
+    // Credentials are only ever sent to the ATTACH url's server. Without a url
+    // they would go to whatever host a later arcgis_query names (and a
+    // password to whatever token service that host advertises).
+    if (creds && !settings.url) {
+      throw new Error(
+        "ArcGIS credentials need the ATTACH option url: they are sent only to that server. " +
+          "To use credentials with arcgis_query, CREATE SECRET (TYPE arcgis, ..., SCOPE '<url prefix>') instead.",
+      );
+    }
     if (creds && settings.url) {
       assertSecureTransport(settings.url, "ArcGIS credentials");
       // Fail the ATTACH on a wrong password rather than on the first query.

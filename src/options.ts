@@ -43,7 +43,7 @@ export const ATTACH_OPTIONS: AttachOptionSpec[] = [
     name: "token",
     description:
       "A pre-generated ArcGIS token for token-secured services, sent as the token parameter on requests to the " +
-      "ATTACH url's server (or to every server when no url is given). Not renewed: when it expires, attach " +
+      "ATTACH url's server only (credentials require url). Not renewed: when it expires, attach " +
       "again. Pass it as token getenv('ARCGIS_TOKEN') to keep it out of the SQL text.",
     type: utf8(),
     secret: true,

@@ -424,9 +424,12 @@ export class ArcgisAuth implements RequestAuth {
   }
 }
 
-/** Do ATTACH credentials apply to `url`? Same origin as the ATTACH url, or any url without one. */
+/**
+ * Do ATTACH credentials apply to `url`? Only on the ATTACH url's origin; an
+ * attach without a url cannot carry credentials (catalog.ts refuses it).
+ */
 export function attachCredentialsApply(attachUrl: string | null, url: string): boolean {
-  if (!attachUrl) return true;
+  if (!attachUrl) return false;
   try {
     return new URL(attachUrl).origin === new URL(url).origin;
   } catch {

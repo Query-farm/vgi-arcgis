@@ -120,7 +120,7 @@ describe("token endpoints and scoping", () => {
   });
 
   test("ATTACH credentials apply to the ATTACH url's origin only", () => {
-    expect(attachCredentialsApply(null, "https://any/x/FeatureServer/0")).toBe(true);
+    expect(attachCredentialsApply(null, "https://any/x/FeatureServer/0")).toBe(false);
     expect(
       attachCredentialsApply("https://a.gov/arcgis/rest/services", "https://a.gov/arcgis/rest/services/S/MapServer/1"),
     ).toBe(true);

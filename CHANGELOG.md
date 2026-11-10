@@ -39,6 +39,8 @@ Breaking: `arcgis_query` returns `geometry` (`GEOMETRY`) instead of `geometry_ge
 - A DuckDB secret type `arcgis` (`TOKEN`, or `USERNAME`/`PASSWORD`, or
   `CLIENT_ID`/`CLIENT_SECRET`): `arcgis_query` uses the one whose `SCOPE` is the longest
   prefix of the layer URL. ATTACH credentials take precedence.
+- ATTACH credentials need a `url` and are sent only to that server (same scheme, host and
+  port); credentials go only over HTTPS (plain HTTP to localhost only).
 - Generated tokens are cached in memory, renewed before they expire and once on a 498.
 - Errors 498/499 say which ATTACH option or secret to set or check. A wrong password fails
   the ATTACH.

@@ -83,9 +83,15 @@ SELECT count(*) FROM duckdb_databases() WHERE database_name = 'tok' AND options:
 ----
 1
 
+# Credentials without a url are refused: they would go to any host arcgis_query names.
+statement error
+ATTACH 'arcgis' AS nourl (TYPE vgi, LOCATION '{ARCGIS_WORKER}', token 'fake-static-token');
+----
+<REGEX>:.*credentials need the ATTACH option url.*CREATE SECRET.*
+
 # An expired token: a clear error naming the option.
 statement ok
-ATTACH 'arcgis' AS stale (TYPE vgi, LOCATION '{ARCGIS_WORKER}', token 'fake-expired-token');
+ATTACH 'arcgis' AS stale (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services', token 'fake-expired-token');
 
 statement error
 SELECT * FROM stale.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0');
