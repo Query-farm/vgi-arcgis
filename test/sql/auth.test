@@ -1,0 +1,226 @@
+# name: test/sql/auth.test
+# description: Token-secured services: ATTACH credentials, the arcgis secret type, errors and redaction (mock server, fake credentials only)
+# group: [arcgis]
+
+require vgi
+
+require-env ARCGIS_WORKER
+
+require-env ARCGIS_MOCK_API
+
+statement ok
+LOAD spatial;
+
+statement ok
+LOAD json;
+
+# The mock's Secured service accepts the fixed token 'fake-static-token', tokens
+# it issues for test-user / not-a-real-password and for the OAuth app
+# test-client-id / not-a-real-client-secret, and revokes each issued token
+# after 4 requests (so scans below renew tokens on 498). None of these is real.
+
+# ============================================================ no credentials
+
+statement ok
+ATTACH 'arcgis' AS anon (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services');
+
+# The secured service is listed, but without credentials it has no views.
+query I
+SELECT count(*) FROM duckdb_views() WHERE database_name = 'anon' AND schema_name = 'secured';
+----
+0
+
+# arcgis_query says what to do.
+statement error
+SELECT * FROM anon.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0');
+----
+<REGEX>:.*499.*Token Required.*ATTACH.*token.*CREATE SECRET.*
+
+# ============================================================ ATTACH token
+
+statement ok
+ATTACH 'arcgis' AS tok (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services', token 'fake-static-token');
+
+query TT
+SELECT schema_name, view_name FROM duckdb_views() WHERE database_name = 'tok' AND schema_name = 'secured';
+----
+secured	restricted_sites
+
+query TTT
+SELECT SITE, STATUS, ST_AsText(geometry) FROM tok.secured.restricted_sites ORDER BY OBJECTID;
+----
+North Gate	open	POINT (-77 38.9)
+Vault	closed	POINT (-77.01 38.91)
+Annex	open	POINT (-77.02 38.92)
+
+# A spatial filter on a secured layer: the token rides along with the box.
+query T
+SELECT SITE FROM tok.secured.restricted_sites
+WHERE ST_Intersects(geometry, ST_MakeEnvelope(-77.015, 38.905, -77.005, 38.915)) ORDER BY 1;
+----
+Vault
+
+query T
+SELECT SITE FROM tok.secured.restricted_sites WHERE geometry && ST_MakeEnvelope(-77.025, 38.895, -77.005, 38.925) ORDER BY 1;
+----
+Annex
+Vault
+
+# Public services of the same directory still work.
+query I
+SELECT count(*) FROM tok.roads.road_centerlines;
+----
+3
+
+# The token is a secret option: duckdb_databases() shows it redacted.
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'tok' AND options::VARCHAR LIKE '%fake-static-token%';
+----
+0
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'tok' AND options::VARCHAR LIKE '%redacted%';
+----
+1
+
+# An expired token: a clear error naming the option.
+statement ok
+ATTACH 'arcgis' AS stale (TYPE vgi, LOCATION '{ARCGIS_WORKER}', token 'fake-expired-token');
+
+statement error
+SELECT * FROM stale.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0');
+----
+<REGEX>:.*498.*ATTACH option token is invalid or has expired.*
+
+# ============================================================ ATTACH username + password
+
+statement ok
+ATTACH 'arcgis' AS usr (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services', username 'test-user', password 'not-a-real-password');
+
+query TT
+SELECT schema_name, view_name FROM duckdb_views() WHERE database_name = 'usr' AND schema_name = 'secured';
+----
+secured	restricted_sites
+
+# Each scan pages (maxRecordCount 2) and outlives the mock's 4-use tokens, so
+# the worker renews its token on 498 and retries.
+query T
+SELECT string_agg(SITE, ',' ORDER BY OBJECTID) FROM usr.secured.restricted_sites;
+----
+North Gate,Vault,Annex
+
+query T
+SELECT string_agg(SITE, ',' ORDER BY OBJECTID) FROM usr.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0') WHERE STATUS = 'open';
+----
+North Gate,Annex
+
+query I
+SELECT count(*) FROM usr.secured.restricted_sites;
+----
+3
+
+query I
+SELECT count(*) FROM duckdb_databases() WHERE database_name = 'usr' AND options::VARCHAR LIKE '%not-a-real-password%';
+----
+0
+
+# A wrong password fails the ATTACH, without echoing it.
+statement error
+ATTACH 'arcgis' AS badpw (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services', username 'test-user', password 'wrong-password');
+----
+<REGEX>:.*Invalid username or password.*Check the ATTACH options username and password.*
+
+# ============================================================ ATTACH client credentials
+
+statement ok
+ATTACH 'arcgis' AS app (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer', client_id 'test-client-id', client_secret 'not-a-real-client-secret');
+
+query T
+SELECT string_agg(SITE, ',' ORDER BY OBJECTID) FROM app.main.restricted_sites;
+----
+North Gate,Vault,Annex
+
+statement error
+ATTACH 'arcgis' AS badapp (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/arcgis/rest/services', client_id 'test-client-id', client_secret 'wrong-secret');
+----
+<REGEX>:.*Invalid client_id or client_secret.*
+
+# ============================================================ option validation
+
+statement error
+ATTACH 'arcgis' AS v1 (TYPE vgi, LOCATION '{ARCGIS_WORKER}', username 'test-user');
+----
+<REGEX>:.*username needs password.*
+
+statement error
+ATTACH 'arcgis' AS v2 (TYPE vgi, LOCATION '{ARCGIS_WORKER}', client_secret 'not-a-real-client-secret');
+----
+<REGEX>:.*client_secret needs client_id.*
+
+statement error
+ATTACH 'arcgis' AS v3 (TYPE vgi, LOCATION '{ARCGIS_WORKER}', token 'fake-static-token', username 'test-user', password 'not-a-real-password');
+----
+<REGEX>:.*cannot be combined.*
+
+# ============================================================ CREATE SECRET (TYPE arcgis)
+
+statement ok
+CREATE SECRET arcgis_mock (TYPE arcgis, TOKEN 'fake-static-token', SCOPE '{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/');
+
+query T
+SELECT string_agg(SITE, ',' ORDER BY OBJECTID) FROM anon.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0');
+----
+North Gate,Vault,Annex
+
+# The token is redacted in duckdb_secrets().
+query I
+SELECT count(*) FROM duckdb_secrets() WHERE name = 'arcgis_mock' AND secret_string LIKE '%fake-static-token%';
+----
+0
+
+# Catalog listings get no secrets: the secured service still has no views here.
+query I
+SELECT count(*) FROM duckdb_views() WHERE database_name = 'anon' AND schema_name = 'secured';
+----
+0
+
+# The longest scope wins: a stale token for this one layer overrides the folder's.
+statement ok
+CREATE SECRET arcgis_layer (TYPE arcgis, TOKEN 'fake-expired-token', SCOPE '{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0');
+
+statement error
+SELECT * FROM anon.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0');
+----
+<REGEX>:.*498.*TOKEN of the arcgis secret 'arcgis_layer' is invalid or has expired.*
+
+statement ok
+DROP SECRET arcgis_layer;
+
+# ATTACH credentials come first: the stale ATTACH token is used even though a valid secret matches.
+statement error
+SELECT * FROM stale.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0');
+----
+<REGEX>:.*498.*ATTACH option token.*
+
+# A secret with username and password.
+statement ok
+CREATE OR REPLACE SECRET arcgis_mock (TYPE arcgis, USERNAME 'test-user', PASSWORD 'not-a-real-password', SCOPE '{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/');
+
+query I
+SELECT count(*) FROM anon.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0') WHERE STATUS = 'open';
+----
+2
+
+query I
+SELECT count(*) FROM duckdb_secrets() WHERE name = 'arcgis_mock' AND secret_string LIKE '%not-a-real-password%';
+----
+0
+
+statement ok
+DROP SECRET arcgis_mock;
+
+# Public layers need no secret.
+query I
+SELECT count(*) FROM anon.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Roads/MapServer/0');
+----
+3

@@ -30,6 +30,20 @@ Breaking: `arcgis_query` returns `geometry` (`GEOMETRY`) instead of `geometry_ge
 - A non-REST URL whose host is not a Hub site still fails at ATTACH, with a clearer message.
 - New worker environment variables `ARCGIS_HUB_API` and `ARCGIS_PORTAL_API` override the Hub
   and ArcGIS Online API roots (used by the offline tests).
+- Token-secured services. ATTACH options `token`, `username` + `password` (tokens generated
+  at the server's token service) and `client_id` + `client_secret` (an ArcGIS OAuth app's
+  client-credentials flow) apply to the ATTACH `url`'s server, so a secured directory now
+  lists its secured services as views. They are declared secret: redacted from
+  `duckdb_databases()` and carried encrypted in the attach value. Write
+  `token getenv('ARCGIS_TOKEN')` to keep a token out of the SQL.
+- A DuckDB secret type `arcgis` (`TOKEN`, or `USERNAME`/`PASSWORD`, or
+  `CLIENT_ID`/`CLIENT_SECRET`): `arcgis_query` uses the one whose `SCOPE` is the longest
+  prefix of the layer URL. ATTACH credentials take precedence.
+- Generated tokens are cached in memory, renewed before they expire and once on a 498.
+- Errors 498/499 say which ATTACH option or secret to set or check. A wrong password fails
+  the ATTACH.
+- Tokens, passwords and client secrets are redacted from every log line and error message,
+  and metadata is cached per identity.
 
 ## 0.3.0
 

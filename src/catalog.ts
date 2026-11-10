@@ -19,7 +19,9 @@ import {
   type VgiFunction,
   type ViewInfo,
 } from "@query-farm/vgi";
+import { ARCGIS_SECRET_TYPE, ArcgisAuth, assertSecureTransport, attachAuth, credentialsFrom } from "./auth.ts";
 import { type DiscoveredSchema, type DiscoveredView, directorySchemas, mainViews, serviceViews } from "./discovery.ts";
+import type { RequestAuth } from "./http.ts";
 import { hubSiteSchemas, itemViews, resolveUrl } from "./hub.ts";
 import { CATALOG_DOC_MD, CATALOG_NAME, CATALOG_TAGS, SCHEMA_DOC_MD, SCHEMA_TAGS, SOURCE_URL } from "./meta.ts";
 import { ATTACH_OPTIONS, decodeSettings, encodeSettings, settingsFromOptions } from "./options.ts";
@@ -51,6 +53,7 @@ export const CATALOG: CatalogDescriptor = {
   sourceUrl: SOURCE_URL,
   tags: CATALOG_TAGS,
   attachOptions: ATTACH_OPTIONS,
+  secretTypes: [ARCGIS_SECRET_TYPE],
   schemas: [
     {
       path: ["main"],
@@ -64,9 +67,9 @@ export const CATALOG: CatalogDescriptor = {
 const isMain = (path: string[]) => path.length === 1 && path[0]?.toLowerCase() === "main";
 
 /** The per-service schemas of a services directory or Hub site url; none for a service or layer. */
-async function urlSchemas(url: string): Promise<(DiscoveredSchema & { itemId?: string })[]> {
+async function urlSchemas(url: string, auth?: RequestAuth | null): Promise<(DiscoveredSchema & { itemId?: string })[]> {
   const target = await resolveUrl(url);
-  if (target.kind === "directory") return directorySchemas(target.url);
+  if (target.kind === "directory") return directorySchemas(target.url, auth);
   if (target.kind === "hub_site") return hubSiteSchemas(target);
   return [];
 }
@@ -114,6 +117,14 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
     const settings = settingsFromOptions(options ?? {});
     // Validate early and store normalized: a Hub dataset URL is stored as its REST URL.
     if (settings.url) settings.url = (await resolveUrl(settings.url)).url;
+    // Credentials stay out of encodeSettings: the SDK carries the secret
+    // options, encrypted, and attachOptions() reads them back (auth.ts).
+    const creds = credentialsFrom(options ?? {}, "ATTACH option");
+    if (creds && settings.url) {
+      assertSecureTransport(settings.url, "ArcGIS credentials");
+      // Fail the ATTACH on a wrong password rather than on the first query.
+      if (creds.kind !== "token") await new ArcgisAuth(creds, "attach").token(settings.url);
+    }
     const base = await super.attach(name, options, dataVersionSpec, implementationVersion, clientCapabilities);
     return { ...(base as CatalogAttachResult), attach_opaque_data: encodeSettings(settings) };
   }
@@ -128,7 +139,7 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
       const { view: _view, ...counts } = (info.estimated_object_count ?? {}) as Record<string, number>;
       return { ...info, estimated_object_count: counts };
     };
-    const discovered = await urlSchemas(url);
+    const discovered = await urlSchemas(url, attachAuth(attach, url));
     if (discovered.length === 0) return base.map(unknownViews);
     return [
       ...base,
@@ -170,12 +181,15 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
   ): Promise<ViewInfo[]> {
     const { url } = decodeSettings(attach);
     if (!url) return [];
+    // Catalog hooks get no DuckDB secrets: only ATTACH credentials apply here,
+    // and only on the ATTACH url's own server (auth.ts attachCredentialsApply).
+    const auth = attachAuth(attach, url);
     const target = await resolveUrl(url);
     if (isMain(path))
-      return target.kind === "hub_site" ? [] : (await mainViews(target.url)).map((v) => toViewInfo(v, path));
-    const schema = (await urlSchemas(url)).find((s) => s.name === path[0]?.toLowerCase());
+      return target.kind === "hub_site" ? [] : (await mainViews(target.url, auth)).map((v) => toViewInfo(v, path));
+    const schema = (await urlSchemas(url, auth)).find((s) => s.name === path[0]?.toLowerCase());
     if (!schema || path.length !== 1) return [];
-    const views = schema.itemId ? await itemViews(schema.serviceUrl) : await serviceViews(schema.serviceUrl);
+    const views = schema.itemId ? await itemViews(schema.serviceUrl) : await serviceViews(schema.serviceUrl, auth);
     return views.map((v) => toViewInfo(v, path));
   }
 

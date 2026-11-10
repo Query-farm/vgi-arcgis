@@ -76,7 +76,15 @@ export const CATALOG_DOC_LLM =
   "behind it, in ATTACH and in `arcgis_query`. Simple WHERE predicates and spatial filters against a " +
   "constant (`geometry && <box>`, ST_Intersects, ST_Within, ...) run on the ArcGIS server, and results " +
   "page automatically; the `precision` " +
-  "ATTACH option (default 7) sets how many decimals coordinates keep. Data is read live on every query.";
+  "ATTACH option (default 7) sets how many decimals coordinates keep. Data is read live on every query. " +
+  "Token-secured services need credentials: the secret ATTACH options `token`, `username` + `password` or " +
+  "`client_id` + `client_secret` (an ArcGIS OAuth app) apply to the ATTACH `url`'s server, and list its secured " +
+  "services as views. Or create a DuckDB secret of type `arcgis` (fields TOKEN, or USERNAME and PASSWORD, or " +
+  "CLIENT_ID and CLIENT_SECRET, plus a SCOPE URL prefix), which `arcgis_query` uses for URLs under the scope " +
+  "but which catalog listings cannot see:\n\n" +
+  "```sql\nCREATE SECRET gis (TYPE arcgis, TOKEN getenv('ARCGIS_TOKEN'), " +
+  "SCOPE 'https://gis.example.gov/arcgis/rest/services/');\n```\n\n" +
+  "ATTACH credentials win over a secret. Errors 498/499 mean a missing, invalid or expired token.";
 
 export const CATALOG_DOC_MD =
   "# VGI ArcGIS worker\n\n" +
@@ -87,14 +95,24 @@ export const CATALOG_DOC_MD =
   "- `url` may also be an ArcGIS Hub / Open Data site (`https://gis.data.ca.gov`, one schema per service " +
   "in its catalog) or one of its dataset pages (`.../datasets/<itemId>_0`, resolved to the REST layer).\n" +
   "- `precision` decimal places kept in coordinates (default 7, about 1 cm).\n" +
-  "- `arcgis.main.arcgis_query(url)` reads any layer by URL without attaching it.\n\n" +
+  "- `arcgis.main.arcgis_query(url)` reads any layer by URL without attaching it.\n" +
+  "- Token-secured services: ATTACH with `token`, `username` + `password`, or `client_id` + `client_secret` " +
+  "(secret options, redacted from `duckdb_databases()`), or create an `arcgis` secret scoped to a URL prefix " +
+  "for `arcgis_query`. Generated tokens are renewed automatically. In the DuckDB CLI, `getenv()` keeps a " +
+  "credential out of the SQL text:\n\n" +
+  "```sql\nATTACH 'arcgis' AS gis (TYPE vgi, LOCATION '/path/to/vgi-arcgis-worker',\n" +
+  "  url 'https://gis.example.gov/arcgis/rest/services', token getenv('ARCGIS_TOKEN'));\n" +
+  "CREATE SECRET gis_token (TYPE arcgis, TOKEN getenv('ARCGIS_TOKEN'),\n" +
+  "  SCOPE 'https://gis.example.gov/arcgis/rest/services/');\n```\n\n" +
   "Simple filters (numeric comparisons, string equality and IN, IS NULL, prefix matches) and spatial " +
   "filters against a constant (`geometry && <box>`, `ST_Intersects`, `ST_Within`, ...) run on the ArcGIS " +
   "server; every filter is also applied exactly in the worker.";
 
 export const SCHEMA_DOC_LLM =
   "The `main` schema holds `arcgis_query(url)`, which reads one ArcGIS layer or table by URL, plus, when " +
-  "the catalog was attached with a service or layer `url`, one view per layer.";
+  "the catalog was attached with a service or layer `url`, one view per layer. For a token-secured layer, " +
+  "`arcgis_query` uses the catalog's ATTACH credentials when they cover the URL's server, else the `arcgis` " +
+  "secret whose SCOPE is the longest prefix of the URL.";
 
 export const SCHEMA_DOC_MD =
   "## main\n\n" +
