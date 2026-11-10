@@ -30,6 +30,22 @@ Services
 
 Every layer has ``maxRecordCount`` 2, so any scan of more than two rows pages.
 
+ArcGIS Hub
+----------
+Synthetic Hub and ArcGIS Online sharing APIs; point the worker at them with
+``ARCGIS_HUB_API=<mock>`` and ``ARCGIS_PORTAL_API=<mock>/sharing/rest``. Item
+URLs point back at this server (from the request's ``Host`` header).
+
+``GET /api/v3/domains/<host>``                      site record, or HTTP 404
+``GET /api/v3/datasets/<itemId>_<n>``               ``data.attributes.url``
+``GET /sharing/rest/content/items/<id>[/data]``     item / site definition
+``GET /sharing/rest/search?q=(group:..) AND (type:..)``  paged 3 at a time
+``GET /sharing/rest/portals/<orgId>``               org ``urlKey``
+``GET /api/search/v1/collections/all/items?q=..``   site search (GeoJSON)
+
+Sites: ``127.0.0.1`` (``catalogV2`` groups g1, g2) and
+``legacy-hub.example.org`` (old ``catalog.groups``: g3). See ``HUB_ITEMS``.
+
 Query parameters honoured: ``where`` (a small SQL subset: comparisons, IN,
 IS [NOT] NULL, LIKE, AND/OR/NOT, parentheses), ``outFields``,
 ``returnGeometry``, ``geometryPrecision``, ``orderByFields`` (object id
@@ -231,6 +247,47 @@ SERVICES[("3DEPIndex", "MapServer")] = {
     "tables": {},
 }
 DIRECTORY[""]["services"].append({"name": "3DEPIndex", "type": "MapServer"})
+
+# ---------------------------------------------------------------- ArcGIS Hub
+
+HUB_SITES = {
+    "127.0.0.1": {"siteId": "a0000000000000000000000000000001", "siteTitle": "Mock Open Data", "orgKey": "MOCKORG",
+                  "orgId": "mockOrgA",
+                  "data": {"catalogV2": {"schemaVersion": 1, "scopes": {"item": {"targetEntity": "item", "filters": [
+                      {"predicates": [{"group": {"any": ["g1", "g2"]}}]}]}}}}},
+    "legacy-hub.example.org": {"siteId": "a0000000000000000000000000000002", "siteTitle": "Legacy Hub",
+                               "orgKey": "MOCKORG", "orgId": "mockOrgA",
+                               "data": {"catalog": {"groups": ["g3"]}}},
+}
+HUB_PORTALS = {"mockOrgA": "MOCKORG", "mockOrgB": "MOCKB"}
+_R = "/arcgis/rest/services"
+# (id, title, type, url path or None, owner, orgId, groups, snippet)
+HUB_ITEMS = [
+    ("1" * 32, "Tax Parcels", "Feature Service", f"{_R}/Demo/Parcels/FeatureServer", "mockcounty", "mockOrgA",
+     ["g1", "g3"], "Parcel polygons, owners and <b>address points</b>"),
+    # The MapServer twin of the item above: listed once, as the FeatureServer.
+    ("2" * 32, "Tax Parcels (map)", "Map Service", f"{_R}/Demo/Parcels/MapServer", "mockcounty", "mockOrgA",
+     ["g2"], None),
+    ("3" * 32, "Road Centerlines", "Feature Service", f"{_R}/Roads/MapServer/0", "mockcounty", "mockOrgA",
+     ["g1", "g3"], "One layer item"),
+    ("4" * 32, "Secured Data", "Feature Service", f"{_R}/Secured/FeatureServer", "mockcounty", "mockOrgA",
+     ["g2"], None),
+    ("5" * 32, "Zoning", "Map Service", f"{_R}/Legacy/MapServer", "county_a", "mockOrgA", ["g1"], None),
+    ("6" * 32, "Zoning", "Map Service", f"{_R}/3DEPIndex/MapServer", "county_b", "mockOrgB", ["g2"], None),
+    ("7" * 32, "Broken Link", "Feature Service", None, "mockcounty", "mockOrgA", ["g1"], None),
+    ("8" * 32, "Hydrants", "Feature Service", f"{_R}/Legacy/MapServer/0", "mockcounty", "mockOrgA", ["g1"], None),
+    ("9" * 32, "Hydrants", "Feature Service", f"{_R}/Demo/Parcels/FeatureServer/1", "mockcounty", "mockOrgA",
+     ["g2"], None),
+    ("a" * 32, "Parcel Story", "StoryMap", None, "mockcounty", "mockOrgA", ["g1"], None),
+]
+HUB_PAGE = 3
+
+
+def _hub_item(row, base: str) -> dict:
+    iid, title, kind, path, owner, org, _groups, snippet = row
+    return {"id": iid, "title": title, "type": kind, "url": f"{base}{path}" if path else None, "owner": owner,
+            "orgId": org, "snippet": snippet, "access": "public"}
+
 
 # ---------------------------------------------------------------- where parser
 
@@ -447,6 +504,9 @@ class Handler(BaseHTTPRequestHandler):
                     _flaky_seen.add(self.path)
                     self._send(429, {"error": "slow down"}, {"Retry-After": "0"})
                     return
+        if url.path.startswith(("/api/", "/sharing/rest/")):
+            self._hub(url.path, q)
+            return
         prefix = "/arcgis/rest/services"
         if not url.path.startswith(prefix):
             self._send(404, {"error": "not found"})
@@ -485,6 +545,70 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"currentVersion": 11.3, **meta})
             return
         self._query(meta, features, q)
+
+    def _hub(self, path: str, q: dict) -> None:  # noqa: C901, PLR0911, PLR0912 - one small router
+        base = f"http://{self.headers.get('Host', '127.0.0.1')}"
+        items = {row[0]: row for row in HUB_ITEMS}
+        if m := re.fullmatch(r"/api/v3/domains/([^/]+)", path):
+            site = HUB_SITES.get(m.group(1))
+            if site is None:
+                self._send(404, {"status": 404, "error": {"title": "Domain record(s) not found"}})
+                return
+            self._send(200, {"hostname": m.group(1), **{k: v for k, v in site.items() if k != "data"}})
+            return
+        if m := re.fullmatch(r"/api/v3/datasets/([0-9a-f]{32})_(\d+)", path):
+            row = items.get(m.group(1))
+            if row is None or row[3] is None:
+                self._send(404, {"errors": [{"title": "Resource Not Found", "status": 404}]})
+                return
+            url = f"{base}{row[3]}"
+            if not re.search(r"/\d+$", url):
+                url = f"{url}/{m.group(2)}"
+            self._send(200, {"data": {"id": f"{row[0]}_{m.group(2)}", "type": "dataset",
+                                      "attributes": {"name": row[1], "url": url}}})
+            return
+        if m := re.fullmatch(r"/sharing/rest/content/items/([0-9a-f]{32})(/data)?", path):
+            if m.group(2):
+                site = next((s for s in HUB_SITES.values() if s["siteId"] == m.group(1)), None)
+                if site is None:
+                    self._error("Item does not exist or is inaccessible.", 400)
+                    return
+                self._send(200, site["data"])
+                return
+            row = items.get(m.group(1))
+            if row is None:
+                self._error("Item does not exist or is inaccessible.", 400)
+                return
+            self._send(200, _hub_item(row, base))
+            return
+        if m := re.fullmatch(r"/sharing/rest/portals/([^/]+)", path):
+            if m.group(1) not in HUB_PORTALS:
+                self._error("Invalid portal", 400)
+                return
+            self._send(200, {"id": m.group(1), "urlKey": HUB_PORTALS[m.group(1)]})
+            return
+        if path == "/sharing/rest/search":
+            text = q.get("q", "")
+            groups = set(re.findall(r"group:(\w+)", text))
+            types = set(re.findall(r'type:"([^"]+)"', text))
+            hits = [r for r in sorted(HUB_ITEMS) if groups & set(r[6]) and (not types or r[2] in types)]
+            start = int(q.get("start", "1"))
+            num = min(int(q.get("num", "10")), HUB_PAGE)
+            page = hits[start - 1:start - 1 + num]
+            nxt = start + len(page) if start - 1 + num < len(hits) else -1
+            self._send(200, {"total": len(hits), "start": start, "num": num, "nextStart": nxt,
+                             "results": [_hub_item(r, base) for r in page]})
+            return
+        if path == "/api/search/v1/collections/all/items":
+            words = [w for w in re.split(r"\W+", q.get("q", "").lower()) if w]
+            hits = [r for r in HUB_ITEMS if all(w in r[1].lower() for w in words)]
+            features = [{"type": "Feature", "id": r[0], "geometry": None,
+                         "properties": {k: v for k, v in _hub_item(r, base).items() if k != "orgId"}}
+                        for r in hits[:int(q.get("limit", "10"))]]
+            self._send(200, {"type": "FeatureCollection", "features": features, "numberMatched": len(hits),
+                             "numberReturned": len(features)})
+            return
+        self._send(404, {"error": "not found"})
 
     def _query(self, meta: dict, features: list, q: dict) -> None:  # noqa: C901, PLR0912
         fmt = q.get("f", "html").lower()

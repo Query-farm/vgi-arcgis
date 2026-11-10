@@ -76,6 +76,10 @@ start_server() {
 # always exercised.
 MOCK_API_FLAKY=1 start_server "$STAGE/mock.log" $PYTHON "$REPO/test/mock_api/server.py"
 export ARCGIS_MOCK_API="http://127.0.0.1:$PORT"
+# The worker reads the ArcGIS Hub and portal API roots from these, so Hub
+# site and dataset URLs resolve against the mock too.
+export ARCGIS_HUB_API="$ARCGIS_MOCK_API"
+export ARCGIS_PORTAL_API="$ARCGIS_MOCK_API/sharing/rest"
 
 HTTP=0
 case "$TRANSPORT" in

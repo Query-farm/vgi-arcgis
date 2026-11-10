@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- ArcGIS Hub / Open Data URLs. `ATTACH ... (url 'https://gis.data.ca.gov')` lists one schema
+  per Feature Service and Map Service item in the site's catalog. It reads both `catalogV2`
+  and older `catalog.groups` sites, and works with custom domains, `*.hub.arcgis.com` and
+  `*.opendata.arcgis.com`. Schemas are named after item titles, deduplicated by service URL
+  (FeatureServer over MapServer), and tagged with `arcgis.item_id`. A Hub service that
+  cannot be read gets no views instead of failing the listing.
+- Hub dataset pages (`/datasets/<itemId>_<n>`, `/datasets/<itemId>`,
+  `/datasets/<orgKey>::<slug>`, also `/maps/…`, `/items/…` and `/about`/`/explore` suffixes)
+  resolve to their REST layer or service, both as an ATTACH `url` and in `arcgis_query(url)`.
+- A non-REST URL whose host is not a Hub site still fails at ATTACH, with a clearer message.
+- New worker environment variables `ARCGIS_HUB_API` and `ARCGIS_PORTAL_API` override the Hub
+  and ArcGIS Online API roots (used by the offline tests).
+
 ## 0.3.0
 
 - VGI protocol 3.2: built on @query-farm/vgi 0.49.1, so the worker loads in the current

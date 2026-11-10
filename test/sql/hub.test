@@ -1,0 +1,139 @@
+# name: test/sql/hub.test
+# description: ArcGIS Hub / Open Data site and dataset URLs, against the mock Hub APIs in test/mock_api/server.py
+# group: [arcgis]
+
+require vgi
+
+require-env ARCGIS_WORKER
+
+require-env ARCGIS_MOCK_API
+
+statement ok
+LOAD spatial;
+
+statement ok
+LOAD json;
+
+# ============================================================ url = a Hub site
+
+# The mock is the Hub site for host 127.0.0.1 (catalogV2 groups g1, g2).
+statement ok
+ATTACH 'arcgis' AS hub (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/search?collection=Dataset');
+
+# One schema per service item: the MapServer twin of Tax Parcels, the item
+# without a URL and the StoryMap are skipped; duplicate titles are qualified
+# by owner, then by item id.
+query T
+SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'hub' ORDER BY 1;
+----
+county_a_zoning
+county_b_zoning
+main
+mockcounty_hydrants_88888888888888888888888888888888
+mockcounty_hydrants_99999999999999999999999999999999
+road_centerlines
+secured_data
+tax_parcels
+
+query TT
+SELECT comment, tags['arcgis.item_id'] FROM duckdb_schemas() WHERE database_name = 'hub' AND schema_name = 'tax_parcels';
+----
+<REGEX>:Tax Parcels\. Parcel polygons, owners and address points \(ArcGIS Hub item 1+: .*/Demo/Parcels/FeatureServer\)	11111111111111111111111111111111
+
+query TT
+SELECT schema_name, view_name FROM duckdb_views() WHERE database_name = 'hub' AND schema_name IN ('tax_parcels', 'road_centerlines', 'secured_data') ORDER BY 1, 2;
+----
+road_centerlines	road_centerlines
+tax_parcels	address_points
+tax_parcels	owners
+tax_parcels	tax_parcels
+
+query TT
+SELECT PARCEL_ID, ST_GeometryType(geometry)::VARCHAR FROM hub.tax_parcels.tax_parcels WHERE FIPS = '51003' ORDER BY 1;
+----
+B-1	POLYGON
+B-2	MULTIPOLYGON
+
+query I
+SELECT count(*) FROM hub.road_centerlines.road_centerlines;
+----
+3
+
+# The older site format (catalog.groups); the host only has to be known to the Hub API.
+statement ok
+ATTACH 'arcgis' AS legacy (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url 'https://legacy-hub.example.org');
+
+query T
+SELECT schema_name FROM duckdb_schemas() WHERE database_name = 'legacy' ORDER BY 1;
+----
+main
+road_centerlines
+tax_parcels
+
+# ============================================================ url = a Hub dataset
+
+# By <itemId>_<layer>: a layer, so one view in main.
+statement ok
+ATTACH 'arcgis' AS ds (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url 'https://data.example.org/datasets/11111111111111111111111111111111_0/explore');
+
+query TI
+SELECT view_name, (SELECT count(*) FROM ds.main.tax_parcels) FROM duckdb_views() WHERE database_name = 'ds';
+----
+tax_parcels	5
+
+# By slug: the whole service.
+statement ok
+ATTACH 'arcgis' AS slug (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/datasets/MOCKORG::tax-parcels/about');
+
+query TT
+SELECT schema_name, view_name FROM duckdb_views() WHERE database_name = 'slug' ORDER BY 1, 2;
+----
+main	address_points
+main	owners
+main	tax_parcels
+
+# Two "Zoning" items: the org key picks one.
+statement ok
+ATTACH 'arcgis' AS zoning (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/datasets/mockb::zoning');
+
+query T
+SELECT view_name FROM duckdb_views() WHERE database_name = 'zoning' ORDER BY 1;
+----
+coverage
+dem_product_index_1_meter
+query_1_meter
+
+statement error
+ATTACH 'arcgis' AS amb (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url '{ARCGIS_MOCK_API}/datasets/hydrants');
+----
+<REGEX>:.*ambiguous.*
+
+# ============================================================ arcgis_query with a dataset URL
+
+query II
+SELECT count(*), sum(OBJECTID) FROM ds.main.arcgis_query('https://data.example.org/datasets/11111111111111111111111111111111_0');
+----
+5	15
+
+query T
+SELECT ADDRESS FROM ds.main.arcgis_query('{ARCGIS_MOCK_API}/datasets/99999999999999999999999999999999_1') WHERE ZIP = '22902';
+----
+2 Oak Ave
+
+# A dataset that is a whole service is not one layer.
+statement error
+SELECT * FROM ds.main.arcgis_query('{ARCGIS_MOCK_API}/datasets/MOCKORG::tax-parcels');
+----
+<REGEX>:.*layer URL.*
+
+# ============================================================ not REST, not Hub
+
+statement error
+ATTACH 'arcgis' AS nothub (TYPE vgi, LOCATION '{ARCGIS_WORKER}', url 'https://not-a-hub.example.com/some/page');
+----
+<REGEX>:.*not an ArcGIS Hub site.*
+
+statement error
+SELECT * FROM ds.main.arcgis_query('https://not-a-hub.example.com/datasets/parcels');
+----
+<REGEX>:.*not an ArcGIS Hub site.*
