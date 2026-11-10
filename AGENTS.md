@@ -25,8 +25,10 @@ src/
   worker.ts        # entry point: serves the catalog over stdio, --unix or --http
   catalog.ts       # ArcgisCatalog: ATTACH options, dynamic schemas/views; FUNCTIONS
   discovery.ts     # walk a services directory / service into schemas and view SQL
-  query.ts         # arcgis_query(url): paging, pushdown, GeoJSON passthrough
+  query.ts         # arcgis_query(url): paging, pushdown, geometry as WKB
   where.ts         # DuckDB pushdown filters -> ArcGIS `where` (superset only)
+  spatial.ts       # `geometry && <constant>` -> ArcGIS envelope query (superset only)
+  wkb.ts           # GeoJSON -> WKB for the geometry column; WKB extents
   esri.ts          # URL classification, field types, Esri JSON -> GeoJSON
   http.ts          # fetch with retries/timeouts, metadata cache
   options.ts       # ATTACH options (url, precision) carried in attach_opaque_data

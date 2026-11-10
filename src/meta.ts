@@ -67,10 +67,11 @@ export const CATALOG_DOC_LLM =
   "Query ArcGIS REST feature services (FeatureServer and MapServer layers, as published by state and " +
   "local governments through ArcGIS Server, ArcGIS Online and ArcGIS Hub) from DuckDB SQL. " +
   "`main.arcgis_query(url)` reads one layer or table: attribute fields become typed columns and geometry " +
-  "arrives as GeoJSON text (`geometry_geojson`, WGS84). Attach with a `url` option to get views instead: " +
+  "becomes a `geometry` GEOMETRY column (WGS84). Attach with a `url` option to get views instead: " +
   "a services directory URL gives one schema per service and one view per layer, a service URL gives one " +
-  "view per layer in `main`, a layer URL gives one view. Views expose a GEOMETRY column (via DuckDB spatial). " +
-  "Simple WHERE predicates run on the ArcGIS server and results page automatically; the `precision` " +
+  "view per layer in `main`, a layer URL gives one view. Simple WHERE predicates and spatial filters " +
+  "against a constant (`geometry && <box>`, ST_Intersects, ST_Within, ...) run on the ArcGIS server, and " +
+  "results page automatically; the `precision` " +
   "ATTACH option (default 7) sets how many decimals coordinates keep. Data is read live on every query.";
 
 export const CATALOG_DOC_MD =
@@ -81,8 +82,9 @@ export const CATALOG_DOC_MD =
   "(`.../FeatureServer`, one view per layer) or a single layer (`.../FeatureServer/0`).\n" +
   "- `precision` decimal places kept in coordinates (default 7, about 1 cm).\n" +
   "- `arcgis.main.arcgis_query(url)` reads any layer by URL without attaching it.\n\n" +
-  "Simple filters (numeric comparisons, string equality and IN, IS NULL, prefix matches) run on the " +
-  "ArcGIS server; every filter is also applied exactly in the worker. Geometry is parsed by DuckDB spatial.";
+  "Simple filters (numeric comparisons, string equality and IN, IS NULL, prefix matches) and spatial " +
+  "filters against a constant (`geometry && <box>`, `ST_Intersects`, `ST_Within`, ...) run on the ArcGIS " +
+  "server; every filter is also applied exactly in the worker.";
 
 export const SCHEMA_DOC_LLM =
   "The `main` schema holds `arcgis_query(url)`, which reads one ArcGIS layer or table by URL, plus, when " +

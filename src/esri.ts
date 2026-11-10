@@ -81,8 +81,8 @@ export interface DirectoryMeta {
   services?: { name: string; type: string }[];
 }
 
-/** Name of the column carrying each feature's GeoJSON geometry. */
-export const GEOMETRY_GEOJSON = "geometry_geojson";
+/** Name of the GEOMETRY column (WKB, WGS84) of layers with geometry. */
+export const GEOMETRY = "geometry";
 
 /** Arrow type for an Esri field type, or undefined for types the worker skips (blob, raster, xml, geometry). */
 export function arrowType(esriType: string): VgiDataType | undefined {
@@ -115,7 +115,7 @@ export function arrowType(esriType: string): VgiDataType | undefined {
 
 /** The attribute fields a layer exposes as columns, in server order. */
 export function attributeFields(meta: LayerMeta): EsriField[] {
-  const reserved = new Set([GEOMETRY_GEOJSON, ...(meta.geometryType ? ["geometry"] : [])]);
+  const reserved = new Set(meta.geometryType ? [GEOMETRY] : []);
   return (meta.fields ?? []).filter((f) => arrowType(f.type) !== undefined && !reserved.has(f.name.toLowerCase()));
 }
 

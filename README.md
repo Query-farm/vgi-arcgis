@@ -6,11 +6,11 @@
 
 Query ArcGIS REST feature services from DuckDB with SQL. Point the worker at an ArcGIS
 services directory, a FeatureServer/MapServer, or a single layer, and each layer becomes a
-DuckDB view with typed columns and a `GEOMETRY` column. Filters on attributes run on the
-ArcGIS server.
+DuckDB view with typed columns and a `GEOMETRY` column. Filters on attributes and spatial
+filters such as `ST_Intersects(geometry, <area>)` run on the ArcGIS server.
 
 ```sql
-INSTALL spatial; LOAD spatial;
+INSTALL spatial; LOAD spatial;   -- for the ST_ functions; reading the views needs no extension
 ATTACH 'arcgis' AS va (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis-worker',
                        url 'https://vginmaps.vdem.virginia.gov/arcgis/rest/services');
 
@@ -86,9 +86,9 @@ SELECT * FROM arcgis.main.arcgis_query(
 WHERE FIPS = '51580';
 ```
 
-It returns the layer's attribute fields, plus `geometry_geojson` (VARCHAR, WGS84 GeoJSON) for
-layers with geometry. Parse that with `ST_GeomFromGeoJSON(geometry_geojson)`. The views
-already do this, which is why views need the `spatial` and `json` extensions loaded.
+It returns the layer's attribute fields, plus `geometry` (`GEOMETRY`, WGS84
+longitude/latitude) for layers with geometry. The views are `SELECT * FROM arcgis_query(...)`,
+so both push down the same filters.
 
 ## Columns and types
 
@@ -102,7 +102,8 @@ already do this, which is why views need the `spatial` and `json` extensions loa
 | Date | `TIMESTAMP_MS` |
 
 Raster, Blob, XML and geometry-typed attribute fields are skipped. Each column's comment is
-the field's alias. Geometry is always returned in WGS84 (`outSR=4326`).
+the field's alias. Geometry is always returned in WGS84 (`outSR=4326`), rounded to
+`precision`, as a `GEOMETRY` column named `geometry`.
 
 ## What runs on the server
 
@@ -117,9 +118,32 @@ DuckDB passes the query's filters and its column list to the worker:
   on strings. ArcGIS string comparison depends on the server's database and collation, so
   only translations that can never drop a matching row are sent. The worker then re-applies
   every predicate exactly.
+- **Sent to ArcGIS as a spatial filter:** `geometry && <constant>`, and `ST_Intersects`,
+  `ST_Within`, `ST_Contains`, `ST_ContainsProperly`, `ST_Covers`, `ST_CoveredBy`,
+  `ST_Touches`, `ST_Overlaps`, `ST_Crosses` or `ST_Equals` between `geometry` and a constant
+  geometry. The server returns the features whose envelope meets the constant's envelope
+  (`esriSpatialRelEnvelopeIntersects`), and DuckDB then applies the exact predicate. The
+  envelope is widened slightly before it is sent: by the coordinate rounding step
+  (`precision`) and by 0.5% of its size, because the server reprojects it into the layer's
+  coordinate system. On a layer stored in State Plane, boxes that only touch a feature's
+  envelope lost that feature 20 times in 48 without the margin, and never with it.
+- **Applied by the worker after fetching:** everything else, such as string ranges and `<>`
+  on strings. ArcGIS string comparison depends on the server's database and collation, so
+  only translations that can never drop a matching row are sent. The worker then re-applies
+  every predicate exactly.
 - **Columns:** only the columns the query uses are requested (`outFields`).
-- **Not pushed down:** spatial predicates (`ST_Intersects`, `&&`). A spatial filter or join
-  is evaluated in DuckDB after the layer, or the attribute-filtered part of it, is fetched.
+- **Not pushed down:** spatial joins (the other side is not a constant), `ST_DWithin`,
+  `ST_Disjoint` and `NOT` forms, and spatial filters combined with `OR`.
+
+```sql
+-- Only the parcels near the box are downloaded, not the state's millions.
+SELECT count(*) FROM va.va_base_layers_va_parcels.virginia_parcels
+WHERE ST_Intersects(geometry, ST_MakeEnvelope(-80.005, 37.785, -79.99, 37.795));
+```
+
+Deriving the box from `ST_Intersects` and the other exact predicates needs VGI `fd85f2e`
+or later (stock DuckDB gets it from the `query_farm` repository). Older VGI builds push only
+an explicit `geometry && <constant>`.
 
 ## Paging
 
@@ -142,7 +166,6 @@ metadata is cached for 5 minutes.
   with no views, and the worker logs a warning.
 - **ArcGIS REST URLs only.** ArcGIS Hub / Open Data site URLs are rejected. Use the REST
   services directory behind the site; Hub datasets point at those layers.
-- **No spatial pushdown** (see above).
 - **Imagery and other services** (ImageServer, GeocodeServer, GPServer) are skipped.
 - **DuckDB 2.0 axis order.** Geometry is longitude/latitude. Spheroid functions such as
   `ST_Area_Spheroid` need `SET geometry_always_xy = true` (the default from DuckDB 2.1).
@@ -204,7 +227,8 @@ non-spatial table, a legacy server, and throttling (429 on first request). Nothi
 `vgi-agent-tests.yaml` holds live tasks against Virginia's VGIN services.
 
 `src/` layout: `catalog.ts` (ATTACH and views), `discovery.ts` (walking directories and
-services), `query.ts` (`arcgis_query`), `where.ts` (filter translation), `esri.ts`
+services), `query.ts` (`arcgis_query`), `where.ts` (attribute filter translation),
+`spatial.ts` (spatial filter translation), `wkb.ts` (GeoJSON → WKB, WKB boxes), `esri.ts`
 (metadata, types, Esri JSON → GeoJSON), `http.ts` (retries, caching), `options.ts`.
 
 ## Support

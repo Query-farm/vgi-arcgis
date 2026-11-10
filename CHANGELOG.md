@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+Breaking: `arcgis_query` returns `geometry` (`GEOMETRY`) instead of `geometry_geojson`
+(`VARCHAR`). Use `ST_AsGeoJSON(geometry)` for the old text.
+
+- Spatial filter pushdown. `geometry && <constant>`, and `ST_Intersects`, `ST_Within`,
+  `ST_Contains`, `ST_ContainsProperly`, `ST_Covers`, `ST_CoveredBy`, `ST_Touches`,
+  `ST_Overlaps`, `ST_Crosses` or `ST_Equals` against a constant geometry, become an ArcGIS
+  envelope-intersects query: the server returns only features near the constant, and DuckDB
+  applies the exact predicate. On VGIN, parcels touching a box in Covington take about 1 s
+  instead of downloading 3 million parcels. Deriving the box from the `ST_` predicates needs
+  VGI `fd85f2e` or later.
+- The query envelope is widened by the coordinate rounding step and by 0.5% of its size, for
+  the server's reprojection into the layer's coordinate system. Without it, edge-touching
+  boxes lost features on a State Plane layer (DC GIS, 20 of 48 boxes).
+- Geometry is a native `GEOMETRY` column (geoarrow WKB), so the views are plain
+  `SELECT * FROM arcgis_query(...)` and reading them no longer needs the `spatial` or `json`
+  extension.
+
 ## 0.3.0
 
 - VGI protocol 3.2: built on @query-farm/vgi 0.49.1, so the worker loads in the current

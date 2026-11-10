@@ -34,14 +34,18 @@ Query parameters honoured: ``where`` (a small SQL subset: comparisons, IN,
 IS [NOT] NULL, LIKE, AND/OR/NOT, parentheses), ``outFields``,
 ``returnGeometry``, ``geometryPrecision``, ``orderByFields`` (object id
 ascending), ``resultOffset``, ``resultRecordCount``, ``returnCountOnly``,
-``f`` = ``json`` | ``geojson``. ``outSR`` is accepted and ignored: the data is
-stored in WGS84 already.
+``f`` = ``json`` | ``geojson``, and a spatial filter: ``geometry`` (an Esri JSON
+envelope or polygon, or ``xmin,ymin,xmax,ymax``) with ``geometryType`` and
+``spatialRel`` = ``esriSpatialRelEnvelopeIntersects`` (feature envelopes that
+meet the query geometry's envelope, boundaries included). ``outSR`` and
+``inSR`` are accepted and ignored: the data is stored in WGS84 already.
 
 Test hooks
 ----------
 * ``MOCK_API_FLAKY=1``: the first request for each distinct query URL gets a
   ``429`` with ``Retry-After: 0``, exercising the client's retry path.
-* ``GET /_log``: the ``where`` clauses received, most recent last.
+* ``GET /_log``: the ``where`` clauses received, most recent last, and under
+  ``spatial`` the query envelopes ``[xmin, ymin, xmax, ymax]`` received.
 * ``GET /health``: ``{"status": "ok"}``.
 
 Usage::
@@ -128,6 +132,49 @@ def _esri_rings(polygons: list) -> list:
             want_clockwise = i == 0
             rings.append(ring if clockwise == want_clockwise else list(reversed(ring)))
     return rings
+
+
+def _coords(obj) -> list:
+    """Every [x, y] position in a GeoJSON coordinates tree or Esri geometry."""
+    if isinstance(obj, dict):
+        if "x" in obj:
+            return [[obj["x"], obj["y"]]]
+        return [p for key in ("coordinates", "rings", "paths", "points") if key in obj for p in _coords(obj[key])]
+    if isinstance(obj, list) and obj and isinstance(obj[0], (int, float)):
+        return [obj[:2]]
+    return [p for item in obj for p in _coords(item)] if isinstance(obj, list) else []
+
+
+def _feature_envelope(feature) -> list | None:
+    _attrs, esri, gj = feature
+    points = _coords(gj if gj is not None else esri) if (gj or esri) else []
+    if not points:
+        return None
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def _query_envelope(q: dict) -> list:
+    """The envelope of the ``geometry`` query parameter."""
+    raw = q["geometry"].strip()
+    if not raw.startswith("{"):
+        xmin, ymin, xmax, ymax = (float(v) for v in raw.split(","))
+        return [xmin, ymin, xmax, ymax]
+    geom = json.loads(raw)
+    if "xmin" in geom:
+        return [float(geom[k]) for k in ("xmin", "ymin", "xmax", "ymax")]
+    points = _coords(geom)
+    if not points:
+        raise ValueError("empty geometry")
+    rel = q.get("spatialRel", "esriSpatialRelIntersects")
+    if rel != "esriSpatialRelEnvelopeIntersects":
+        raise ValueError(f"the mock only implements esriSpatialRelEnvelopeIntersects, not {rel}")
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def _envelopes_meet(a: list | None, b: list) -> bool:
+    return a is not None and not (a[0] > b[2] or a[2] < b[0] or a[1] > b[3] or a[3] < b[1])
 
 
 def _rows(fields: list, values: list) -> list:
@@ -397,6 +444,7 @@ def matches(where: str, row: dict) -> bool:
 _flaky_seen: set[str] = set()
 _lock = threading.Lock()
 WHERE_LOG: list[str] = []
+SPATIAL_LOG: list[list[float]] = []
 
 
 def _round(obj, digits):
@@ -439,7 +487,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/_log":
             with _lock:
-                self._send(200, {"where": list(WHERE_LOG)})
+                self._send(200, {"where": list(WHERE_LOG), "spatial": list(SPATIAL_LOG)})
             return
         if os.environ.get("MOCK_API_FLAKY") == "1":
             with _lock:
@@ -504,6 +552,16 @@ class Handler(BaseHTTPRequestHandler):
         except WhereError as err:
             self._error(f"Unable to complete operation. {err}")
             return
+        if "geometry" in q:
+            try:
+                envelope = _query_envelope(q)
+            except (ValueError, KeyError, TypeError) as err:
+                self._error(f"Unable to complete operation. Invalid query geometry: {err}")
+                return
+            with _lock:
+                SPATIAL_LOG.append(envelope)
+                del SPATIAL_LOG[:-200]
+            rows = [f for f in rows if _envelopes_meet(_feature_envelope(f), envelope)]
         if q.get("returnCountOnly", "false").lower() == "true":
             self._send(200, {"count": len(rows)})
             return

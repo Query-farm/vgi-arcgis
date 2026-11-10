@@ -7,12 +7,12 @@
  * - A service becomes one view per feature layer and table, in `main`.
  * - A layer becomes one view in `main`.
  *
- * Every view is `SELECT ... FROM main.arcgis_query('<layer url>')`, so it
- * inherits filter pushdown and paging; layers with geometry swap
- * `geometry_geojson` for a GEOMETRY column built by DuckDB spatial.
+ * Every view is `SELECT * FROM main.arcgis_query('<layer url>')`, so it
+ * inherits filter pushdown (spatial filters included: the view's `geometry`
+ * is the function's own column) and paging.
  */
 
-import { classifyUrl, type DirectoryMeta, GEOMETRY_GEOJSON, type LayerMeta, type ServiceMeta } from "./esri.ts";
+import { classifyUrl, type DirectoryMeta, type LayerMeta, type ServiceMeta } from "./esri.ts";
 import { getMetadata, isAuthError } from "./http.ts";
 import { log } from "./log.ts";
 import { assignNames, sqlName } from "./naming.ts";
@@ -37,12 +37,12 @@ export interface DiscoveredView {
 
 const sqlString = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
-/** The SQL behind a view over one layer. */
-export function viewDefinition(layerUrl: string, hasGeometry: boolean): string {
-  const source = `main.arcgis_query(${sqlString(layerUrl)})`;
-  return hasGeometry
-    ? `SELECT * EXCLUDE (${GEOMETRY_GEOJSON}), ST_GeomFromGeoJSON(${GEOMETRY_GEOJSON}) AS geometry FROM ${source}`
-    : `SELECT * FROM ${source}`;
+/**
+ * The SQL behind a view over one layer. A plain projection, so filters on any
+ * column, `geometry` included, reach `arcgis_query`.
+ */
+export function viewDefinition(layerUrl: string): string {
+  return `SELECT * FROM main.arcgis_query(${sqlString(layerUrl)})`;
 }
 
 const FEATURE_SERVICE_TYPES = ["FeatureServer", "MapServer"];
@@ -142,7 +142,7 @@ export async function serviceViews(serviceUrl: string): Promise<DiscoveredView[]
     return {
       name: names[i] as string,
       comment: `${e.name} (ArcGIS ${kind} ${layerUrl})${description ? `. ${description}` : ""}`,
-      definition: viewDefinition(layerUrl, hasGeometry),
+      definition: viewDefinition(layerUrl),
       layerUrl,
       hasGeometry,
       layerId: e.id,
@@ -160,7 +160,7 @@ export async function layerViews(layerUrl: string): Promise<DiscoveredView[]> {
     {
       name: sqlName(name),
       comment: `${name} (ArcGIS layer ${layerUrl})`,
-      definition: viewDefinition(layerUrl, hasGeometry),
+      definition: viewDefinition(layerUrl),
       layerUrl,
       hasGeometry,
       layerId: Number(layerUrl.match(/\/(\d+)$/)?.[1] ?? 0),
