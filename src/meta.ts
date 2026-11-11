@@ -13,7 +13,7 @@
 import { field, type VgiDataType, type VgiField } from "@query-farm/vgi";
 
 export const CATALOG_NAME = "arcgis";
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 export const SOURCE_URL = "https://github.com/Query-farm/vgi-arcgis";
 

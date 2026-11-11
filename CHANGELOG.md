@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 Breaking: `arcgis_query` returns `geometry` (`GEOMETRY`) instead of `geometry_geojson`
 (`VARCHAR`). Use `ST_AsGeoJSON(geometry)` for the old text.
@@ -9,9 +9,9 @@ Breaking: `arcgis_query` returns `geometry` (`GEOMETRY`) instead of `geometry_ge
   `ST_Contains`, `ST_ContainsProperly`, `ST_Covers`, `ST_CoveredBy`, `ST_Touches`,
   `ST_Overlaps`, `ST_Crosses` or `ST_Equals` against a constant geometry, become an ArcGIS
   envelope-intersects query: the server returns only features near the constant, and DuckDB
-  applies the exact predicate. On VGIN, parcels touching a box in Covington take about 1 s
-  instead of downloading 3 million parcels. Deriving the box from the `ST_` predicates needs
-  VGI `fd85f2e` or later.
+  applies the exact predicate. On VGIN, parcels touching a box in Covington take a few
+  seconds instead of downloading 3 million parcels. Deriving the box from the `ST_` predicates
+  needs VGI `67c7710` or later.
 - The query envelope is widened by the coordinate rounding step and by 0.5% of its size, for
   the server's reprojection into the layer's coordinate system. Without it, edge-touching
   boxes lost features on a State Plane layer (DC GIS, 20 of 48 boxes).
@@ -46,6 +46,9 @@ Breaking: `arcgis_query` returns `geometry` (`GEOMETRY`) instead of `geometry_ge
   the ATTACH.
 - Tokens, passwords and client secrets are redacted from every log line and error message,
   and metadata is cached per identity.
+- Built on @query-farm/vgi 0.49.2, whose SDK-side `&&` check matches DuckDB 2.0 core.
+
+Targets: @query-farm/vgi 0.49 · VGI protocol 3.2 · Haybarn 2.0.0rc11 and DuckDB 2.0.0.
 
 ## 0.3.0
 

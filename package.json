@@ -1,5 +1,5 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Query ArcGIS REST feature services (FeatureServer/MapServer) from DuckDB as SQL tables, via VGI.",
@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@query-farm/apache-arrow": "^21.1.1",
-    "@query-farm/vgi": "~0.49.1",
+    "@query-farm/vgi": "~0.49.2",
     "@query-farm/vgi-rpc": "^0.29.7"
   },
   "devDependencies": {
