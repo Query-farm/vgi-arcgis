@@ -5,30 +5,28 @@
  * - Filters DuckDB pushes down become the ArcGIS `where` clause where that
  *   is safe (see where.ts), and are re-applied exactly to every batch
  *   (`autoApplyFilters`); only the projected columns are requested.
- * - Geometry is never decoded here: ArcGIS returns GeoJSON (or, for servers
- *   without `f=geojson`, Esri JSON reshaped to GeoJSON) and the text is passed
- *   through in `geometry_geojson`, in WGS84, rounded to the ATTACH `precision`.
- *   The catalog's views turn it into GEOMETRY with `ST_GeomFromGeoJSON`.
+ * - Geometry arrives as GeoJSON (or, for servers without `f=geojson`, Esri
+ *   JSON reshaped to GeoJSON), in WGS84 rounded to the ATTACH `precision`, and
+ *   is emitted as a `geometry` GEOMETRY column (geoarrow WKB).
+ * - `geometry && <constant>`, which DuckDB pushes for `&&` and derives from
+ *   ST_Intersects/ST_Within/... against a constant, becomes an ArcGIS
+ *   envelope-intersects query (see spatial.ts).
  * - Paging is keyset on the object id when the layer supports `orderBy`,
  *   `resultOffset` when it only supports pagination, and a single request
  *   otherwise (failing loudly if the server truncates it).
  */
 
-import { batchFromColumns, defineTableFunction, schema, utf8 } from "@query-farm/vgi";
-import {
-  arrowType,
-  attributeFields,
-  classifyUrl,
-  esriToGeoJson,
-  GEOMETRY_GEOJSON,
-  type LayerMeta,
-  supportsGeoJson,
-} from "./esri.ts";
-import { ArcgisError, getJson, getMetadata } from "./http.ts";
+import { batchFromColumns, binary, defineTableFunction, field, schema, utf8 } from "@query-farm/vgi";
+import { resolveAuth, secretLookup } from "./auth.ts";
+import { arrowType, attributeFields, esriToGeoJson, GEOMETRY, type LayerMeta, supportsGeoJson } from "./esri.ts";
+import { ArcgisError, getJson, getMetadata, isAuthError, type RequestAuth } from "./http.ts";
+import { resolveUrl } from "./hub.ts";
 import { log } from "./log.ts";
 import { column, objectTags } from "./meta.ts";
 import { decodeSettings } from "./options.ts";
+import { padBox, spatialFilterBox, spatialQueryParams } from "./spatial.ts";
 import { WhereBuilder } from "./where.ts";
+import { geojsonToWkb } from "./wkb.ts";
 
 interface QueryArgs {
   url: string;
@@ -48,13 +46,20 @@ interface QueryState {
 
 type PagingMode = "keyset" | "offset" | "single";
 
-/** Fetch and check a layer's metadata. @throws Error if the URL is not a layer. */
-export async function layerMeta(url: string): Promise<{ url: string; meta: LayerMeta }> {
-  const target = classifyUrl(url);
+/**
+ * Fetch and check a layer's metadata; an ArcGIS Hub dataset URL is resolved
+ * to its layer first (cached). @throws Error if the URL is not a layer.
+ */
+export async function layerMeta(url: string, auth?: RequestAuth | null): Promise<{ url: string; meta: LayerMeta }> {
+  const target = await resolveUrl(url);
   if (target.kind !== "layer") {
-    throw new Error(`arcgis_query needs a layer URL ending in /FeatureServer/<id> or /MapServer/<id>, got '${url}'`);
+    throw new Error(
+      "arcgis_query needs a layer URL ending in /FeatureServer/<id> or /MapServer/<id>, or an ArcGIS Hub " +
+        `dataset URL for one layer (.../datasets/<itemId>_<id>), got '${url}'` +
+        (target.kind === "service" ? ` (a whole service, ${target.url})` : ""),
+    );
   }
-  const meta = (await getMetadata(`${target.url}?f=json`)) as LayerMeta;
+  const meta = (await getMetadata(`${target.url}?f=json`, auth)) as LayerMeta;
   if (!Array.isArray(meta.fields)) throw new ArcgisError(`${target.url} has no field list; is it a feature layer?`);
   return { url: target.url, meta };
 }
@@ -122,11 +127,18 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
   argDocs: {
     url:
       "Layer or table URL, e.g. 'https://host/arcgis/rest/services/Folder/Name/FeatureServer/0'. " +
+      "Also accepts an ArcGIS Hub / Open Data dataset page for one layer, e.g. " +
+      "'https://gis.data.ca.gov/datasets/<itemId>_0' or '.../datasets/<orgKey>::<slug>'. " +
       "Query strings are ignored.",
   },
-  argConstraints: { url: { pattern: "^https?://.+/(FeatureServer|MapServer)/[0-9]+/?$" } },
+  argConstraints: {
+    url: { pattern: "^https?://(.+/(FeatureServer|MapServer)/[0-9]+/?$|[^/]+/(datasets|maps|items)/[^/?#]+)" },
+  },
   filterPushdown: true,
   projectionPushdown: true,
+  // `geometry && <constant>` (bounding boxes intersect): sent to ArcGIS as an
+  // envelope-intersects query, and re-applied exactly like every other filter.
+  additionalFilterFunctions: [{ namespace: "duckdb.spatial", name: "intersects_extent", version: 1 }],
   // DuckDB drops every predicate it pushes down from its own plan, so the
   // worker must return exactly the matching rows. The ArcGIS `where` is only a
   // superset (see where.ts); the SDK re-applies all pushed predicates, with
@@ -134,20 +146,39 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
   autoApplyFilters: true,
 
   onBind: async (params) => {
-    const { meta } = await layerMeta(params.args.url);
+    // First pass (unless ATTACH credentials apply): also ask DuckDB for the
+    // `arcgis` secret scoped to this URL; it re-binds with it. The schema is
+    // still real when the layer is public, for clients that bind only once.
+    const attach = params.bindCall.attach_opaque_data;
+    const lookup = secretLookup(attach, params.args.url, params.resolvedSecretsProvided);
+    let meta: LayerMeta;
+    try {
+      ({ meta } = await layerMeta(
+        params.args.url,
+        lookup ? null : resolveAuth(attach, params.secrets, params.args.url),
+      ));
+    } catch (err) {
+      if (lookup && isAuthError(err)) return { outputSchema: schema([]), ...lookup };
+      throw err;
+    }
     const columns = attributeFields(meta).map((f) =>
       column(f.name, arrowType(f.type) as NonNullable<ReturnType<typeof arrowType>>, f.alias || f.name),
     );
     if (meta.geometryType) {
       columns.push(
-        column(
-          GEOMETRY_GEOJSON,
-          utf8(),
-          "Feature geometry as GeoJSON text in WGS84 (EPSG:4326); parse with ST_GeomFromGeoJSON.",
+        field(
+          GEOMETRY,
+          binary(),
+          true,
+          new Map([
+            ["comment", "Feature geometry in WGS84 (EPSG:4326) longitude/latitude, rounded to the ATTACH precision."],
+            ["ARROW:extension:name", "geoarrow.wkb"],
+            ["ARROW:extension:metadata", "{}"],
+          ]),
         ),
       );
     }
-    return { outputSchema: schema(columns) };
+    return { outputSchema: schema(columns), ...lookup };
   },
 
   initialState: () => ({ lastOid: 0, started: false, offset: 0, pages: 0, done: false }),
@@ -157,14 +188,19 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
       out.finish();
       return;
     }
-    const { url, meta } = await layerMeta(params.args.url);
+    // Re-derived on every call: tokens never travel in the state.
+    const auth = resolveAuth(params.initCall.bind_call.attach_opaque_data, params.secrets, params.args.url);
+    const { url, meta } = await layerMeta(params.args.url, auth);
     const settings = decodeSettings(params.initCall.bind_call.attach_opaque_data);
     const fields = attributeFields(meta);
     const fieldTypes = new Map(fields.map((f) => [f.name, f.type]));
-    const where = new WhereBuilder(fieldTypes).where(params.pushdownFilters?.filters ?? []);
+    const filters = params.pushdownFilters?.filters ?? [];
+    const where = new WhereBuilder(fieldTypes).where(filters);
+    const box = meta.geometryType ? spatialFilterBox(filters, GEOMETRY) : undefined;
+    const sendBox = box ? padBox(box, settings.precision) : undefined;
     const wanted = params.outputSchema.fields.map((f) => f.name);
-    const attrs = wanted.filter((n) => n !== GEOMETRY_GEOJSON);
-    const wantGeometry = wanted.includes(GEOMETRY_GEOJSON);
+    const attrs = wanted.filter((n) => n !== GEOMETRY);
+    const wantGeometry = wanted.includes(GEOMETRY);
     const oid = meta.objectIdField;
     const mode = pagingMode(meta);
     const outFields = new Set(attrs);
@@ -183,14 +219,18 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
       f: geojson ? "geojson" : "json",
     });
     if (wantGeometry) q.set("geometryPrecision", String(settings.precision));
+    if (sendBox) for (const [k, v] of Object.entries(spatialQueryParams(sendBox))) q.set(k, v);
     if (mode === "keyset") q.set("orderByFields", `${oid} ASC`);
     const size = pageSize(meta, state.pages, wantGeometry && Boolean(meta.geometryType));
     if (mode === "offset") q.set("resultOffset", String(state.offset));
     if (size !== undefined && mode !== "single") q.set("resultRecordCount", String(size));
     if (state.offset === 0)
-      log.debug(`arcgis_query ${url}: mode=${mode} where=${where} outFields=${q.get("outFields")}`);
+      log.debug(
+        `arcgis_query ${url}: mode=${mode} where=${where} outFields=${q.get("outFields")}` +
+          (sendBox ? ` box=${[sendBox.xmin, sendBox.ymin, sendBox.xmax, sendBox.ymax].join(",")}` : ""),
+      );
 
-    const body = (await getJson(`${url}/query?${q}`)) as {
+    const body = (await getJson(`${url}/query?${q}`, auth)) as {
       features?: ArcgisFeature[];
       exceededTransferLimit?: boolean;
       properties?: { exceededTransferLimit?: boolean };
@@ -212,9 +252,9 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
       columns[name] = features.map((f) => coerce(type, attributesOf(f)[name]));
     }
     if (wantGeometry) {
-      columns[GEOMETRY_GEOJSON] = features.map((f) => {
+      columns[GEOMETRY] = features.map((f) => {
         const g = geojson ? f.geometry : esriToGeoJson(f.geometry);
-        return g ? JSON.stringify(g) : null;
+        return g ? geojsonToWkb(g) : null;
       });
     }
     out.emit(batchFromColumns(columns, params.outputSchema));
@@ -246,21 +286,28 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
         "arcgis, esri, feature service, featureserver, mapserver, gis, geojson, rest api, layer, query, geospatial",
       docLlm:
         "Read every feature of one ArcGIS REST layer or table at `url` (ending in /FeatureServer/<id> or " +
-        "/MapServer/<id>). The result columns depend on the layer: one column per attribute field, typed from " +
+        "/MapServer/<id>). An ArcGIS Hub / Open Data dataset page URL for one layer also works " +
+        "(`https://<site>/datasets/<itemId>_<id>` or `.../datasets/<orgKey>::<slug>`); it is resolved to the " +
+        "layer's REST URL first. The result columns depend on the layer: one column per attribute field, typed from " +
         "the layer metadata (object ids and integers as `INTEGER`, small integers as `SMALLINT`, doubles as " +
         "`DOUBLE`, dates as `TIMESTAMP_MS`, strings and GUIDs as `VARCHAR`). Layers with geometry add " +
-        "`geometry_geojson` (`VARCHAR`), the geometry as GeoJSON in WGS84 rounded to the ATTACH `precision` " +
-        "(default 7 decimals); wrap it with ST_GeomFromGeoJSON(geometry_geojson) to get `GEOMETRY`, or use the " +
-        "views the catalog creates when attached with a `url`. Simple WHERE predicates are sent to the server " +
-        "(numeric comparisons, string equality and IN, IS NULL, prefix/contains matches) and every predicate is " +
-        "also applied exactly to the returned rows. Results are paged automatically. Filter on an attribute " +
-        "(e.g. a FIPS code) for large layers: an unfiltered scan downloads the whole layer.",
+        "`geometry` (`GEOMETRY`), WGS84 longitude/latitude rounded to the ATTACH `precision` (default 7 " +
+        "decimals). Simple WHERE predicates are sent to the server (numeric comparisons, string equality and IN, " +
+        "IS NULL, prefix/contains matches), and so are spatial filters against a constant: `geometry && <box>` " +
+        "and ST_Intersects / ST_Within / ST_Contains / ST_Covers / ST_Touches / ST_Overlaps / ST_Crosses / " +
+        "ST_Equals(geometry, <constant geometry>) make the server return only features whose envelope meets the " +
+        "constant's. Every predicate is also applied exactly to the returned rows. Results are paged " +
+        "automatically. Filter large layers on an attribute (e.g. a FIPS code) or an area: an unfiltered scan " +
+        "downloads the whole layer.",
       docMd:
         "## arcgis_query(url)\n\n" +
         "Every feature of one ArcGIS FeatureServer/MapServer layer or table, paged automatically.\n\n" +
+        "- `url` is a layer URL (`.../FeatureServer/0`) or an ArcGIS Hub dataset page for one layer " +
+        "(`https://<site>/datasets/<itemId>_0`).\n" +
         "- Attribute fields become typed columns; the set of columns depends on the layer.\n" +
-        "- Geometry arrives as `geometry_geojson` text in WGS84; `ST_GeomFromGeoJSON` turns it into `GEOMETRY`.\n" +
-        "- Simple filters run on the ArcGIS server, so filter large layers on an attribute such as a FIPS code.",
+        "- Layers with geometry add `geometry` (`GEOMETRY`, WGS84 longitude/latitude).\n" +
+        "- Simple attribute filters and spatial filters against a constant (`&&`, `ST_Intersects`, `ST_Within`, " +
+        "...) run on the ArcGIS server, so filter large layers on an attribute or an area.",
     }),
     "vgi.result_dynamic_columns_md":
       "The columns follow the layer at `url`: one column per attribute field, in server order, typed from " +
@@ -269,8 +316,8 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
       "with the field alias as the column comment. Layers with geometry add one fixed column:\n\n" +
       "| Name | Type | Description |\n" +
       "| --- | --- | --- |\n" +
-      "| geometry_geojson | VARCHAR | Geometry as GeoJSON in WGS84, rounded to the ATTACH `precision`; " +
-      "parse with `ST_GeomFromGeoJSON`. |",
+      "| geometry | GEOMETRY | Feature geometry in WGS84 longitude/latitude, rounded to the ATTACH " +
+      "`precision`. Spatial filters against a constant run on the server. |",
   },
   examples: [
     {
@@ -282,11 +329,11 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
     },
     {
       sql:
-        "SELECT NAMELSAD, ST_Area_Spheroid(ST_GeomFromGeoJSON(geometry_geojson)) / 1e6 AS km2 " +
+        "SELECT NAMELSAD, ST_Area_Spheroid(geometry) / 1e6 AS km2 " +
         "FROM arcgis.main.arcgis_query(" +
         "'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1') " +
         "WHERE NAME IN ('Covington', 'Buena Vista') ORDER BY NAMELSAD",
-      description: "Areas of two Virginia cities, parsing the GeoJSON geometry with DuckDB spatial",
+      description: "Areas of two Virginia cities with DuckDB spatial",
     },
     {
       sql:
@@ -294,6 +341,15 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
         "'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Landmarks/FeatureServer/1') " +
         "WHERE PlaceType = 'Hospital Points' AND City LIKE 'Rich%' ORDER BY LandmkName",
       description: "Hospitals in Virginia cities whose names start with 'Rich', from the statewide landmarks layer",
+    },
+    {
+      sql:
+        "SELECT count(*) AS parcels FROM arcgis.main.arcgis_query(" +
+        "'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0') " +
+        "WHERE ST_Intersects(geometry, ST_MakeEnvelope(-80.005, 37.785, -79.99, 37.795))",
+      description:
+        "Parcels touching a small box in downtown Covington; the server returns only features near the box, " +
+        "not the state's millions of parcels",
     },
   ],
 });

@@ -11,6 +11,14 @@ Directory
 ``GET /arcgis/rest/services/<svc>/<Type>?f=json``    service: layers + tables
 ``GET /arcgis/rest/services/<svc>/<Type>/<id>?f=json``   layer metadata
 ``GET /arcgis/rest/services/<svc>/<Type>/<id>/query``    query
+``GET /arcgis/rest/info?f=json``                     server info: ``authInfo.tokenServicesUrl``
+
+Token service (a federated server: its tokens come from a portal)
+-----------------------------------------------------------------
+``POST /portal/sharing/rest/generateToken``    ``username``/``password`` (+ ``client=referer``) -> token
+``POST /portal/sharing/rest/oauth2/token``     ``client_credentials`` grant -> ``access_token``
+
+Every credential here is fake and exists only in this file.
 
 Services
 --------
@@ -21,8 +29,13 @@ Services
 * ``Demo/Imagery`` ImageServer (not a feature service; skipped).
 * ``3DEPIndex`` MapServer: "1 meter" under group "DEM Product Index" and
   "1 Meter" under group "Query" (duplicate names told apart by group).
-* ``Secured`` FeatureServer that answers every request with error 499 "Token
-  Required" (a subscriber-only service; listed with no views).
+* ``Secured`` FeatureServer: layer 0 ``Restricted Sites`` (points). Without a
+  token it answers error 499 "Token Required", with a bad or expired one 498
+  "Invalid Token". Accepted tokens: ``STATIC_TOKEN``, and tokens issued by the
+  token service, which must come with the ``Referer`` they were generated
+  for. ``EXPIRED_TOKEN`` is always rejected with 498. An issued token is
+  revoked after ``TOKEN_USES`` requests although its advertised ``expires``
+  is an hour away, so the worker's renew-on-498 path runs in every scan.
 * ``Roads`` MapServer: layer 0 ``Road Centerlines`` (polylines) with no
   ``orderBy`` support but ``resultOffset`` paging.
 * ``Legacy`` MapServer: layer 0 ``Old Points`` with neither ordering nor
@@ -30,18 +43,40 @@ Services
 
 Every layer has ``maxRecordCount`` 2, so any scan of more than two rows pages.
 
+ArcGIS Hub
+----------
+Synthetic Hub and ArcGIS Online sharing APIs; point the worker at them with
+``ARCGIS_HUB_API=<mock>`` and ``ARCGIS_PORTAL_API=<mock>/sharing/rest``. Item
+URLs point back at this server (from the request's ``Host`` header).
+
+``GET /api/v3/domains/<host>``                      site record, or HTTP 404
+``GET /api/v3/datasets/<itemId>_<n>``               ``data.attributes.url``
+``GET /sharing/rest/content/items/<id>[/data]``     item / site definition
+``GET /sharing/rest/search?q=(group:..) AND (type:..)``  paged 3 at a time
+``GET /sharing/rest/portals/<orgId>``               org ``urlKey``
+``GET /api/search/v1/collections/all/items?q=..``   site search (GeoJSON)
+
+Sites: ``127.0.0.1`` (``catalogV2`` groups g1, g2) and
+``legacy-hub.example.org`` (old ``catalog.groups``: g3). See ``HUB_ITEMS``.
+
 Query parameters honoured: ``where`` (a small SQL subset: comparisons, IN,
 IS [NOT] NULL, LIKE, AND/OR/NOT, parentheses), ``outFields``,
 ``returnGeometry``, ``geometryPrecision``, ``orderByFields`` (object id
 ascending), ``resultOffset``, ``resultRecordCount``, ``returnCountOnly``,
-``f`` = ``json`` | ``geojson``. ``outSR`` is accepted and ignored: the data is
-stored in WGS84 already.
+``f`` = ``json`` | ``geojson``, and a spatial filter: ``geometry`` (an Esri JSON
+envelope or polygon, or ``xmin,ymin,xmax,ymax``) with ``geometryType`` and
+``spatialRel`` = ``esriSpatialRelEnvelopeIntersects`` (feature envelopes that
+meet the query geometry's envelope, boundaries included). ``outSR`` and
+``inSR`` are accepted and ignored: the data is stored in WGS84 already.
 
 Test hooks
 ----------
 * ``MOCK_API_FLAKY=1``: the first request for each distinct query URL gets a
   ``429`` with ``Retry-After: 0``, exercising the client's retry path.
-* ``GET /_log``: the ``where`` clauses received, most recent last.
+* ``GET /_log``: the ``where`` clauses received, most recent last, and under
+  ``spatial`` the query envelopes ``[xmin, ymin, xmax, ymax]`` received.
+* ``GET /_auth_log``: how many tokens were issued (``generate``, ``oauth``) and
+  how many secured requests were rejected (``rejected``).
 * ``GET /health``: ``{"status": "ok"}``.
 
 Usage::
@@ -58,11 +93,19 @@ import os
 import re
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 MAX_RECORDS = 2
 DAY_MS = 86_400_000
+
+# Fake credentials for the secured service. Never real ones.
+STATIC_TOKEN = "fake-static-token"
+EXPIRED_TOKEN = "fake-expired-token"
+USERS = {"test-user": "not-a-real-password"}
+CLIENTS = {"test-client-id": "not-a-real-client-secret"}
+TOKEN_USES = 4
 
 PARCEL_FIELDS = [
     {"name": "OBJECTID", "type": "esriFieldTypeOID"},
@@ -111,6 +154,11 @@ ROAD_FIELDS = [
 ROADS = [(1, "Main St", 25, [[[0, 0], [1, 1]]]), (2, "Route 29", 55, [[[0, 0], [0, 5]], [[0, 6], [0, 9]]]),
          (3, "Oak Ave", 25, [[[2, 2], [3, 3], [4, 3]]])]
 
+SITE_FIELDS = [{"name": "OBJECTID", "type": "esriFieldTypeOID"}, {"name": "SITE", "type": "esriFieldTypeString"},
+               {"name": "STATUS", "type": "esriFieldTypeString"}]
+SITES = [(1, "North Gate", "open", (-77.0, 38.9)), (2, "Vault", "closed", (-77.01, 38.91)),
+         (3, "Annex", "open", (-77.02, 38.92))]
+
 LEGACY_FIELDS = [{"name": "OBJECTID", "type": "esriFieldTypeOID"}, {"name": "KIND", "type": "esriFieldTypeString"}]
 LEGACY = [(1, "a", (0, 0)), (2, "b", (1, 1)), (3, "b", (2, 2))]
 
@@ -128,6 +176,49 @@ def _esri_rings(polygons: list) -> list:
             want_clockwise = i == 0
             rings.append(ring if clockwise == want_clockwise else list(reversed(ring)))
     return rings
+
+
+def _coords(obj) -> list:
+    """Every [x, y] position in a GeoJSON coordinates tree or Esri geometry."""
+    if isinstance(obj, dict):
+        if "x" in obj:
+            return [[obj["x"], obj["y"]]]
+        return [p for key in ("coordinates", "rings", "paths", "points") if key in obj for p in _coords(obj[key])]
+    if isinstance(obj, list) and obj and isinstance(obj[0], (int, float)):
+        return [obj[:2]]
+    return [p for item in obj for p in _coords(item)] if isinstance(obj, list) else []
+
+
+def _feature_envelope(feature) -> list | None:
+    _attrs, esri, gj = feature
+    points = _coords(gj if gj is not None else esri) if (gj or esri) else []
+    if not points:
+        return None
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def _query_envelope(q: dict) -> list:
+    """The envelope of the ``geometry`` query parameter."""
+    raw = q["geometry"].strip()
+    if not raw.startswith("{"):
+        xmin, ymin, xmax, ymax = (float(v) for v in raw.split(","))
+        return [xmin, ymin, xmax, ymax]
+    geom = json.loads(raw)
+    if "xmin" in geom:
+        return [float(geom[k]) for k in ("xmin", "ymin", "xmax", "ymax")]
+    points = _coords(geom)
+    if not points:
+        raise ValueError("empty geometry")
+    rel = q.get("spatialRel", "esriSpatialRelIntersects")
+    if rel != "esriSpatialRelEnvelopeIntersects":
+        raise ValueError(f"the mock only implements esriSpatialRelEnvelopeIntersects, not {rel}")
+    xs, ys = [p[0] for p in points], [p[1] for p in points]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def _envelopes_meet(a: list | None, b: list) -> bool:
+    return a is not None and not (a[0] > b[2] or a[2] < b[0] or a[1] > b[3] or a[3] < b[1])
 
 
 def _rows(fields: list, values: list) -> list:
@@ -191,6 +282,13 @@ SERVICES = {
                               ",".join(GJ), order_by=False, pagination=True), _road_features())},
         "tables": {},
     },
+    ("Secured", "FeatureServer"): {
+        "layers": {0: (_layer(0, "Restricted Sites", "Feature Layer", SITE_FIELDS, "esriGeometryPoint",
+                              ",".join(GJ)),
+                       [({"OBJECTID": o, "SITE": n, "STATUS": st}, {"x": p[0], "y": p[1]},
+                         {"type": "Point", "coordinates": list(p)}) for o, n, st, p in SITES])},
+        "tables": {},
+    },
     ("Legacy", "MapServer"): {
         "layers": {0: (_layer(0, "Old Points", "Feature Layer", LEGACY_FIELDS, "esriGeometryPoint", "JSON",
                               order_by=False, pagination=False),
@@ -231,6 +329,47 @@ SERVICES[("3DEPIndex", "MapServer")] = {
     "tables": {},
 }
 DIRECTORY[""]["services"].append({"name": "3DEPIndex", "type": "MapServer"})
+
+# ---------------------------------------------------------------- ArcGIS Hub
+
+HUB_SITES = {
+    "127.0.0.1": {"siteId": "a0000000000000000000000000000001", "siteTitle": "Mock Open Data", "orgKey": "MOCKORG",
+                  "orgId": "mockOrgA",
+                  "data": {"catalogV2": {"schemaVersion": 1, "scopes": {"item": {"targetEntity": "item", "filters": [
+                      {"predicates": [{"group": {"any": ["g1", "g2"]}}]}]}}}}},
+    "legacy-hub.example.org": {"siteId": "a0000000000000000000000000000002", "siteTitle": "Legacy Hub",
+                               "orgKey": "MOCKORG", "orgId": "mockOrgA",
+                               "data": {"catalog": {"groups": ["g3"]}}},
+}
+HUB_PORTALS = {"mockOrgA": "MOCKORG", "mockOrgB": "MOCKB"}
+_R = "/arcgis/rest/services"
+# (id, title, type, url path or None, owner, orgId, groups, snippet)
+HUB_ITEMS = [
+    ("1" * 32, "Tax Parcels", "Feature Service", f"{_R}/Demo/Parcels/FeatureServer", "mockcounty", "mockOrgA",
+     ["g1", "g3"], "Parcel polygons, owners and <b>address points</b>"),
+    # The MapServer twin of the item above: listed once, as the FeatureServer.
+    ("2" * 32, "Tax Parcels (map)", "Map Service", f"{_R}/Demo/Parcels/MapServer", "mockcounty", "mockOrgA",
+     ["g2"], None),
+    ("3" * 32, "Road Centerlines", "Feature Service", f"{_R}/Roads/MapServer/0", "mockcounty", "mockOrgA",
+     ["g1", "g3"], "One layer item"),
+    ("4" * 32, "Secured Data", "Feature Service", f"{_R}/Secured/FeatureServer", "mockcounty", "mockOrgA",
+     ["g2"], None),
+    ("5" * 32, "Zoning", "Map Service", f"{_R}/Legacy/MapServer", "county_a", "mockOrgA", ["g1"], None),
+    ("6" * 32, "Zoning", "Map Service", f"{_R}/3DEPIndex/MapServer", "county_b", "mockOrgB", ["g2"], None),
+    ("7" * 32, "Broken Link", "Feature Service", None, "mockcounty", "mockOrgA", ["g1"], None),
+    ("8" * 32, "Hydrants", "Feature Service", f"{_R}/Legacy/MapServer/0", "mockcounty", "mockOrgA", ["g1"], None),
+    ("9" * 32, "Hydrants", "Feature Service", f"{_R}/Demo/Parcels/FeatureServer/1", "mockcounty", "mockOrgA",
+     ["g2"], None),
+    ("a" * 32, "Parcel Story", "StoryMap", None, "mockcounty", "mockOrgA", ["g1"], None),
+]
+HUB_PAGE = 3
+
+
+def _hub_item(row, base: str) -> dict:
+    iid, title, kind, path, owner, org, _groups, snippet = row
+    return {"id": iid, "title": title, "type": kind, "url": f"{base}{path}" if path else None, "owner": owner,
+            "orgId": org, "snippet": snippet, "access": "public"}
+
 
 # ---------------------------------------------------------------- where parser
 
@@ -397,6 +536,10 @@ def matches(where: str, row: dict) -> bool:
 _flaky_seen: set[str] = set()
 _lock = threading.Lock()
 WHERE_LOG: list[str] = []
+SPATIAL_LOG: list[list[float]] = []
+# Issued token -> (Referer it is bound to or None, requests left).
+ISSUED: dict[str, list] = {}
+AUTH_LOG = {"generate": 0, "oauth": 0, "rejected": 0}
 
 
 def _round(obj, digits):
@@ -430,6 +573,56 @@ class Handler(BaseHTTPRequestHandler):
         # ArcGIS reports errors with HTTP 200 and an error object.
         self._send(200, {"error": {"code": code, "message": message, "details": []}})
 
+    def _token_error(self, q: dict) -> tuple[int, str] | None:
+        """None when the request carries a token the secured service accepts."""
+        token = q.get("token")
+        if not token:
+            return 499, "Token Required"
+        if token == STATIC_TOKEN:
+            return None
+        with _lock:
+            entry = ISSUED.get(token)
+            if entry is None or entry[1] <= 0 or (entry[0] and self.headers.get("Referer") != entry[0]):
+                return 498, "Invalid Token"
+            entry[1] -= 1
+        return None
+
+    def do_POST(self) -> None:
+        """The token service: generateToken and oauth2/token."""
+        url = urlparse(self.path)
+        length = int(self.headers.get("Content-Length") or 0)
+        form = {k: v[-1] for k, v in parse_qs(self.rfile.read(length).decode()).items()}
+        if url.path == "/portal/sharing/rest/generateToken":
+            if USERS.get(form.get("username", "")) != form.get("password") or "password" not in form:
+                self._send(200, {"error": {"code": 400, "message": "Unable to generate token.",
+                                           "details": ["Invalid username or password."]}})
+                return
+            referer = form.get("referer") if form.get("client") == "referer" else None
+            with _lock:
+                AUTH_LOG["generate"] += 1
+                token = f"mock-user-token-{AUTH_LOG['generate']}"
+                ISSUED[token] = [referer, TOKEN_USES]
+            minutes = int(form.get("expiration", "60"))
+            self._send(200, {"token": token, "expires": int(time.time() * 1000) + minutes * 60_000, "ssl": False})
+            return
+        if url.path == "/portal/sharing/rest/oauth2/token":
+            if form.get("grant_type") != "client_credentials":
+                self._send(200, {"error": {"code": 400, "error": "unsupported_grant_type",
+                                           "message": "Unsupported grant type", "details": []}})
+                return
+            if CLIENTS.get(form.get("client_id", "")) != form.get("client_secret"):
+                self._send(200, {"error": {"code": 400, "error": "invalid_client",
+                                           "error_description": "Invalid client_id or client_secret",
+                                           "message": "Invalid client_id or client_secret", "details": []}})
+                return
+            with _lock:
+                AUTH_LOG["oauth"] += 1
+                token = f"mock-app-token-{AUTH_LOG['oauth']}"
+                ISSUED[token] = [None, TOKEN_USES]
+            self._send(200, {"access_token": token, "expires_in": 7200})
+            return
+        self._send(404, {"error": "not found"})
+
     def do_GET(self) -> None:  # noqa: C901, PLR0911, PLR0912 - one small router
         """Route a GET request."""
         url = urlparse(self.path)
@@ -439,7 +632,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/_log":
             with _lock:
-                self._send(200, {"where": list(WHERE_LOG)})
+                self._send(200, {"where": list(WHERE_LOG), "spatial": list(SPATIAL_LOG)})
+            return
+        if url.path == "/_auth_log":
+            with _lock:
+                self._send(200, dict(AUTH_LOG))
+            return
+        if url.path == "/arcgis/rest/info":
+            base = f"http://{self.headers.get('Host')}"
+            self._send(200, {"currentVersion": 11.3, "owningSystemUrl": f"{base}/portal",
+                             "authInfo": {"isTokenBasedSecurity": True,
+                                          "tokenServicesUrl": f"{base}/portal/sharing/rest/generateToken"}})
             return
         if os.environ.get("MOCK_API_FLAKY") == "1":
             with _lock:
@@ -447,6 +650,9 @@ class Handler(BaseHTTPRequestHandler):
                     _flaky_seen.add(self.path)
                     self._send(429, {"error": "slow down"}, {"Retry-After": "0"})
                     return
+        if url.path.startswith(("/api/", "/sharing/rest/")):
+            self._hub(url.path, q)
+            return
         prefix = "/arcgis/rest/services"
         if not url.path.startswith(prefix):
             self._send(404, {"error": "not found"})
@@ -456,9 +662,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"currentVersion": 11.3, **DIRECTORY[rest]})
             return
         if rest.startswith("Secured/"):
-            # A subscriber-only service: ArcGIS answers 499 without a token.
-            self._error("Token Required", 499)
-            return
+            # A subscriber-only service: 499 without a token, 498 for a bad one.
+            failure = self._token_error(q)
+            if failure:
+                with _lock:
+                    AUTH_LOG["rejected"] += 1
+                self._error(failure[1], failure[0])
+                return
         m = re.fullmatch(r"(.+)/(FeatureServer|MapServer)(?:/(\d+))?(/query)?", rest)
         if not m or (m.group(1), m.group(2)) not in SERVICES:
             self._error("Service not found", 404)
@@ -486,6 +696,70 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._query(meta, features, q)
 
+    def _hub(self, path: str, q: dict) -> None:  # noqa: C901, PLR0911, PLR0912 - one small router
+        base = f"http://{self.headers.get('Host', '127.0.0.1')}"
+        items = {row[0]: row for row in HUB_ITEMS}
+        if m := re.fullmatch(r"/api/v3/domains/([^/]+)", path):
+            site = HUB_SITES.get(m.group(1))
+            if site is None:
+                self._send(404, {"status": 404, "error": {"title": "Domain record(s) not found"}})
+                return
+            self._send(200, {"hostname": m.group(1), **{k: v for k, v in site.items() if k != "data"}})
+            return
+        if m := re.fullmatch(r"/api/v3/datasets/([0-9a-f]{32})_(\d+)", path):
+            row = items.get(m.group(1))
+            if row is None or row[3] is None:
+                self._send(404, {"errors": [{"title": "Resource Not Found", "status": 404}]})
+                return
+            url = f"{base}{row[3]}"
+            if not re.search(r"/\d+$", url):
+                url = f"{url}/{m.group(2)}"
+            self._send(200, {"data": {"id": f"{row[0]}_{m.group(2)}", "type": "dataset",
+                                      "attributes": {"name": row[1], "url": url}}})
+            return
+        if m := re.fullmatch(r"/sharing/rest/content/items/([0-9a-f]{32})(/data)?", path):
+            if m.group(2):
+                site = next((s for s in HUB_SITES.values() if s["siteId"] == m.group(1)), None)
+                if site is None:
+                    self._error("Item does not exist or is inaccessible.", 400)
+                    return
+                self._send(200, site["data"])
+                return
+            row = items.get(m.group(1))
+            if row is None:
+                self._error("Item does not exist or is inaccessible.", 400)
+                return
+            self._send(200, _hub_item(row, base))
+            return
+        if m := re.fullmatch(r"/sharing/rest/portals/([^/]+)", path):
+            if m.group(1) not in HUB_PORTALS:
+                self._error("Invalid portal", 400)
+                return
+            self._send(200, {"id": m.group(1), "urlKey": HUB_PORTALS[m.group(1)]})
+            return
+        if path == "/sharing/rest/search":
+            text = q.get("q", "")
+            groups = set(re.findall(r"group:(\w+)", text))
+            types = set(re.findall(r'type:"([^"]+)"', text))
+            hits = [r for r in sorted(HUB_ITEMS) if groups & set(r[6]) and (not types or r[2] in types)]
+            start = int(q.get("start", "1"))
+            num = min(int(q.get("num", "10")), HUB_PAGE)
+            page = hits[start - 1:start - 1 + num]
+            nxt = start + len(page) if start - 1 + num < len(hits) else -1
+            self._send(200, {"total": len(hits), "start": start, "num": num, "nextStart": nxt,
+                             "results": [_hub_item(r, base) for r in page]})
+            return
+        if path == "/api/search/v1/collections/all/items":
+            words = [w for w in re.split(r"\W+", q.get("q", "").lower()) if w]
+            hits = [r for r in HUB_ITEMS if all(w in r[1].lower() for w in words)]
+            features = [{"type": "Feature", "id": r[0], "geometry": None,
+                         "properties": {k: v for k, v in _hub_item(r, base).items() if k != "orgId"}}
+                        for r in hits[:int(q.get("limit", "10"))]]
+            self._send(200, {"type": "FeatureCollection", "features": features, "numberMatched": len(hits),
+                             "numberReturned": len(features)})
+            return
+        self._send(404, {"error": "not found"})
+
     def _query(self, meta: dict, features: list, q: dict) -> None:  # noqa: C901, PLR0912
         fmt = q.get("f", "html").lower()
         formats = meta["supportedQueryFormats"].lower().split(",")
@@ -504,6 +778,16 @@ class Handler(BaseHTTPRequestHandler):
         except WhereError as err:
             self._error(f"Unable to complete operation. {err}")
             return
+        if "geometry" in q:
+            try:
+                envelope = _query_envelope(q)
+            except (ValueError, KeyError, TypeError) as err:
+                self._error(f"Unable to complete operation. Invalid query geometry: {err}")
+                return
+            with _lock:
+                SPATIAL_LOG.append(envelope)
+                del SPATIAL_LOG[:-200]
+            rows = [f for f in rows if _envelopes_meet(_feature_envelope(f), envelope)]
         if q.get("returnCountOnly", "false").lower() == "true":
             self._send(200, {"count": len(rows)})
             return

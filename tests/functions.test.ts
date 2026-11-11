@@ -59,7 +59,7 @@ describe("WhereBuilder", () => {
     expect(where.where([inList("FIPS", ["a"], true)])).toBe("1=1");
     expect(where.where([cmp("gt", colRef("UPDATED"), lit(0))])).toBe("1=1"); // dates
     expect(where.where([cmp("eq", colRef("ACRES"), lit("1"))])).toBe("1=1"); // type mismatch
-    expect(where.where([cmp("eq", colRef("geometry_geojson"), lit("x"))])).toBe("1=1"); // not an attribute
+    expect(where.where([cmp("eq", colRef("geometry"), lit("x"))])).toBe("1=1"); // not an attribute
     expect(where.where([cmp("gt", colRef("ACRES"), lit(Number.NaN))])).toBe("1=1");
   });
 
@@ -256,10 +256,9 @@ describe("esri helpers", () => {
   });
 
   test("viewDefinition escapes the URL", () => {
-    expect(viewDefinition("https://h/x'y/FeatureServer/0", false)).toBe(
+    expect(viewDefinition("https://h/x'y/FeatureServer/0")).toBe(
       "SELECT * FROM main.arcgis_query('https://h/x''y/FeatureServer/0')",
     );
-    expect(viewDefinition("https://h/FeatureServer/0", true)).toContain("ST_GeomFromGeoJSON(geometry_geojson)");
   });
 });
 
@@ -327,19 +326,24 @@ describe("against the worker and the mock ArcGIS server", () => {
     return rows;
   }
 
-  test("pages through a layer (keyset) and passes GeoJSON through", async () => {
+  /** WKB type code (little-endian ISO) of a geometry cell. */
+  const wkbType = (v: unknown) =>
+    new DataView((v as Uint8Array).buffer, (v as Uint8Array).byteOffset).getUint32(1, true);
+
+  test("pages through a layer (keyset) and returns WKB geometry", async () => {
     const rows = await query(`${services}/Demo/Parcels/FeatureServer/0`);
     expect(rows.map((r) => r.OBJECTID)).toEqual([1, 2, 3, 4, 5]);
     expect(rows[2]?.ACRES).toBeNull();
-    const geometry = JSON.parse(String(rows[3]?.geometry_geojson));
-    expect(geometry.type).toBe("MultiPolygon");
-    // The default precision (7) rounds coordinates.
-    expect(JSON.parse(String(rows[4]?.geometry_geojson)).coordinates[0][0]).toEqual([-77.1234568, 37.9876543]);
+    expect(wkbType(rows[3]?.geometry)).toBe(6); // MultiPolygon
+    // The default precision (7) rounds coordinates: first vertex of the first ring.
+    const g = rows[4]?.geometry as Uint8Array;
+    const view = new DataView(g.buffer, g.byteOffset);
+    expect([view.getFloat64(13, true), view.getFloat64(21, true)]).toEqual([-77.1234568, 37.9876543]);
   });
 
   test("converts Esri JSON for servers without GeoJSON", async () => {
     const rows = await query(`${services}/Demo/Parcels/FeatureServer/1`);
-    expect(rows.map((r) => JSON.parse(String(r.geometry_geojson)).type)).toEqual(["Point", "Point", "Point"]);
+    expect(rows.map((r) => wkbType(r.geometry))).toEqual([1, 1, 1]);
   });
 
   test("offset paging and tables without geometry", async () => {
@@ -350,7 +354,7 @@ describe("against the worker and the mock ArcGIS server", () => {
     ]);
     const owners = await query(`${services}/Demo/Parcels/FeatureServer/2`);
     expect(owners.length).toBe(3);
-    expect("geometry_geojson" in (owners[0] ?? {})).toBe(false);
+    expect("geometry" in (owners[0] ?? {})).toBe(false);
   });
 
   test("refuses a truncated result it cannot page", async () => {

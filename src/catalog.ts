@@ -3,8 +3,9 @@
  *
  * `main` always holds `arcgis_query(url)`. With an ATTACH `url`, the catalog
  * also lists views over the ArcGIS layers it finds there (see discovery.ts),
- * resolved lazily: a services directory's per-service schemas are listed at
- * attach, and each schema's views are fetched when DuckDB first asks.
+ * resolved lazily: a services directory's (or ArcGIS Hub site's) per-service
+ * schemas are listed at attach, and each schema's views are fetched when
+ * DuckDB first asks. A Hub dataset URL is resolved to its REST URL at attach.
  */
 
 import {
@@ -18,8 +19,10 @@ import {
   type VgiFunction,
   type ViewInfo,
 } from "@query-farm/vgi";
-import { type DiscoveredView, directorySchemas, mainViews, serviceViews } from "./discovery.ts";
-import { classifyUrl } from "./esri.ts";
+import { ARCGIS_SECRET_TYPE, ArcgisAuth, assertSecureTransport, attachAuth, credentialsFrom } from "./auth.ts";
+import { type DiscoveredSchema, type DiscoveredView, directorySchemas, mainViews, serviceViews } from "./discovery.ts";
+import type { RequestAuth } from "./http.ts";
+import { hubSiteSchemas, itemViews, resolveUrl } from "./hub.ts";
 import { CATALOG_DOC_MD, CATALOG_NAME, CATALOG_TAGS, SCHEMA_DOC_MD, SCHEMA_TAGS, SOURCE_URL } from "./meta.ts";
 import { ATTACH_OPTIONS, decodeSettings, encodeSettings, settingsFromOptions } from "./options.ts";
 import { arcgisQuery } from "./query.ts";
@@ -50,6 +53,7 @@ export const CATALOG: CatalogDescriptor = {
   sourceUrl: SOURCE_URL,
   tags: CATALOG_TAGS,
   attachOptions: ATTACH_OPTIONS,
+  secretTypes: [ARCGIS_SECRET_TYPE],
   schemas: [
     {
       path: ["main"],
@@ -62,6 +66,14 @@ export const CATALOG: CatalogDescriptor = {
 
 const isMain = (path: string[]) => path.length === 1 && path[0]?.toLowerCase() === "main";
 
+/** The per-service schemas of a services directory or Hub site url; none for a service or layer. */
+async function urlSchemas(url: string, auth?: RequestAuth | null): Promise<(DiscoveredSchema & { itemId?: string })[]> {
+  const target = await resolveUrl(url);
+  if (target.kind === "directory") return directorySchemas(target.url, auth);
+  if (target.kind === "hub_site") return hubSiteSchemas(target);
+  return [];
+}
+
 function toViewInfo(v: DiscoveredView, path: string[]): ViewInfo {
   return {
     name: v.name,
@@ -73,7 +85,12 @@ function toViewInfo(v: DiscoveredView, path: string[]): ViewInfo {
       "arcgis.layer_path": v.layerPath.join(" > "),
     },
     definition: v.definition,
-    column_comments: v.hasGeometry ? { geometry: "Feature geometry (WGS84), parsed from ArcGIS GeoJSON." } : {},
+    column_comments: v.hasGeometry
+      ? {
+          geometry:
+            "Feature geometry in WGS84 longitude/latitude. Spatial filters against a constant run on the server.",
+        }
+      : {},
     aliases: [],
     security: "regular",
   } as ViewInfo;
@@ -90,20 +107,38 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
     super(CATALOG, registry, { perAttachItemIds: true });
   }
 
-  override attach(
+  override async attach(
     name: string,
     options?: Record<string, unknown>,
     dataVersionSpec?: string | null,
     implementationVersion?: string | null,
     clientCapabilities?: Uint8Array | null,
-  ): CatalogAttachResult {
+  ): Promise<CatalogAttachResult> {
     const settings = settingsFromOptions(options ?? {});
-    if (settings.url) settings.url = classifyUrl(settings.url).url; // validate early, store normalized
-    const base = super.attach(name, options, dataVersionSpec, implementationVersion, clientCapabilities);
+    // Validate early and store normalized: a Hub dataset URL is stored as its REST URL.
+    if (settings.url) settings.url = (await resolveUrl(settings.url)).url;
+    // Credentials stay out of encodeSettings: the SDK carries the secret
+    // options, encrypted, and attachOptions() reads them back (auth.ts).
+    const creds = credentialsFrom(options ?? {}, "ATTACH option");
+    // Credentials are only ever sent to the ATTACH url's server. Without a url
+    // they would go to whatever host a later arcgis_query names (and a
+    // password to whatever token service that host advertises).
+    if (creds && !settings.url) {
+      throw new Error(
+        "ArcGIS credentials need the ATTACH option url: they are sent only to that server. " +
+          "To use credentials with arcgis_query, CREATE SECRET (TYPE arcgis, ..., SCOPE '<url prefix>') instead.",
+      );
+    }
+    if (creds && settings.url) {
+      assertSecureTransport(settings.url, "ArcGIS credentials");
+      // Fail the ATTACH on a wrong password rather than on the first query.
+      if (creds.kind !== "token") await new ArcgisAuth(creds, "attach").token(settings.url);
+    }
+    const base = await super.attach(name, options, dataVersionSpec, implementationVersion, clientCapabilities);
     return { ...(base as CatalogAttachResult), attach_opaque_data: encodeSettings(settings) };
   }
 
-  /** `main` (functions, plus views for a service/layer url) and one schema per service for a directory url. */
+  /** `main` (functions, plus views for a service/layer url) and one schema per service for a directory or Hub site url. */
   override async schemas(attach: AttachOpaqueData, txn?: TransactionOpaqueData): Promise<SchemaInfo[]> {
     const base = await super.schemas(attach, txn);
     const { url } = decodeSettings(attach);
@@ -113,16 +148,15 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
       const { view: _view, ...counts } = (info.estimated_object_count ?? {}) as Record<string, number>;
       return { ...info, estimated_object_count: counts };
     };
-    const target = classifyUrl(url);
-    if (target.kind !== "directory") return base.map(unknownViews);
-    const discovered = await directorySchemas(target.url);
+    const discovered = await urlSchemas(url, attachAuth(attach, url));
+    if (discovered.length === 0) return base.map(unknownViews);
     return [
       ...base,
       ...discovered.map((s) =>
         unknownViews({
           path: [s.name],
           comment: s.comment,
-          tags: { "arcgis.service_url": s.serviceUrl },
+          tags: { "arcgis.service_url": s.serviceUrl, ...(s.itemId ? { "arcgis.item_id": s.itemId } : {}) },
           estimated_object_count: {
             table: 0,
             scalar_function: 0,
@@ -156,12 +190,16 @@ export class ArcgisCatalog extends ReadOnlyCatalogInterface {
   ): Promise<ViewInfo[]> {
     const { url } = decodeSettings(attach);
     if (!url) return [];
-    if (isMain(path)) return (await mainViews(url)).map((v) => toViewInfo(v, path));
-    const target = classifyUrl(url);
-    if (target.kind !== "directory") return [];
-    const schema = (await directorySchemas(target.url)).find((s) => s.name === path[0]?.toLowerCase());
+    // Catalog hooks get no DuckDB secrets: only ATTACH credentials apply here,
+    // and only on the ATTACH url's own server (auth.ts attachCredentialsApply).
+    const auth = attachAuth(attach, url);
+    const target = await resolveUrl(url);
+    if (isMain(path))
+      return target.kind === "hub_site" ? [] : (await mainViews(target.url, auth)).map((v) => toViewInfo(v, path));
+    const schema = (await urlSchemas(url, auth)).find((s) => s.name === path[0]?.toLowerCase());
     if (!schema || path.length !== 1) return [];
-    return (await serviceViews(schema.serviceUrl)).map((v) => toViewInfo(v, path));
+    const views = schema.itemId ? await itemViews(schema.serviceUrl) : await serviceViews(schema.serviceUrl, auth);
+    return views.map((v) => toViewInfo(v, path));
   }
 
   override async viewGet(

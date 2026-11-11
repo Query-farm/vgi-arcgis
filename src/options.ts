@@ -4,9 +4,15 @@
  *   ATTACH 'arcgis' AS va (TYPE vgi, LOCATION '...',
  *                          url 'https://host/arcgis/rest/services', precision 6);
  *
- * The values are validated in `attach()` and encoded into
+ * `url` and `precision` are validated in `attach()` and encoded into
  * `attach_opaque_data`, which DuckDB hands back with every catalog and
  * function call, so they survive pooled workers and stateless HTTP.
+ *
+ * The credential options (`token`, `username`, `password`, `client_id`,
+ * `client_secret`) are declared `secret: true` and are NOT part of those
+ * bytes: the SDK encrypts them into the attach value itself, the extension
+ * redacts them from `duckdb_databases()`, and code reads them back with
+ * `attachOptions()` (see auth.ts).
  */
 
 import { type AttachOptionSpec, int32, utf8 } from "@query-farm/vgi";
@@ -19,7 +25,9 @@ export const ATTACH_OPTIONS: AttachOptionSpec[] = [
     name: "url",
     description:
       "ArcGIS REST URL to expose as tables: a services directory (.../arcgis/rest/services or a folder), " +
-      "a service (.../FeatureServer or .../MapServer) or a single layer (.../FeatureServer/0). " +
+      "a service (.../FeatureServer or .../MapServer) or a single layer (.../FeatureServer/0); " +
+      "or an ArcGIS Hub / Open Data site (https://<site>, one schema per service in its catalog) or " +
+      "one of its dataset pages (https://<site>/datasets/<id>, resolved to the REST layer or service). " +
       "Omit it to use only the arcgis_query() table function.",
     type: utf8(),
   },
@@ -30,6 +38,47 @@ export const ATTACH_OPTIONS: AttachOptionSpec[] = [
       "7 is about 1 cm in longitude/latitude.",
     type: int32,
     default: DEFAULT_PRECISION,
+  },
+  {
+    name: "token",
+    description:
+      "A pre-generated ArcGIS token for token-secured services, sent as the token parameter on requests to the " +
+      "ATTACH url's server only (credentials require url). Not renewed: when it expires, attach " +
+      "again. Pass it as token getenv('ARCGIS_TOKEN') to keep it out of the SQL text.",
+    type: utf8(),
+    secret: true,
+  },
+  {
+    name: "username",
+    description:
+      "ArcGIS Server, ArcGIS Enterprise or ArcGIS Online user name. With password, the worker generates tokens " +
+      "at the server's token service (from <server>/rest/info) and renews them before they expire.",
+    type: utf8(),
+    secret: true,
+  },
+  {
+    name: "password",
+    description:
+      "Password for username, sent only to the server's token service over HTTPS. Pass it as " +
+      "password getenv('ARCGIS_PASSWORD').",
+    type: utf8(),
+    secret: true,
+  },
+  {
+    name: "client_id",
+    description:
+      "Client ID of an ArcGIS OAuth application (ArcGIS Online or an ArcGIS Enterprise portal). With " +
+      "client_secret, the worker gets app tokens with the OAuth client-credentials flow and renews them.",
+    type: utf8(),
+    secret: true,
+  },
+  {
+    name: "client_secret",
+    description:
+      "Client secret of the OAuth application named by client_id, sent only to the portal's oauth2/token " +
+      "endpoint over HTTPS. Pass it as client_secret getenv('ARCGIS_CLIENT_SECRET').",
+    type: utf8(),
+    secret: true,
   },
 ];
 

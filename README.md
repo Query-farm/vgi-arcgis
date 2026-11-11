@@ -5,12 +5,13 @@
 # vgi-arcgis
 
 Query ArcGIS REST feature services from DuckDB with SQL. Point the worker at an ArcGIS
-services directory, a FeatureServer/MapServer, or a single layer, and each layer becomes a
-DuckDB view with typed columns and a `GEOMETRY` column. Filters on attributes run on the
-ArcGIS server.
+services directory, a FeatureServer/MapServer, a single layer, or an ArcGIS Hub / Open Data
+site or dataset page, and each layer becomes a DuckDB view with typed columns and a
+`GEOMETRY` column. Filters on attributes and spatial filters such as
+`ST_Intersects(geometry, <area>)` run on the ArcGIS server.
 
 ```sql
-INSTALL spatial; LOAD spatial;
+INSTALL spatial; LOAD spatial;   -- for the ST_ functions; reading the views needs no extension
 ATTACH 'arcgis' AS va (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis-worker',
                        url 'https://vginmaps.vdem.virginia.gov/arcgis/rest/services');
 
@@ -27,13 +28,17 @@ service live.
 ## Attaching
 
 ```sql
-ATTACH 'arcgis' AS <name> (TYPE vgi, LOCATION '<worker>' [, url '<arcgis url>'] [, precision <n>]);
+ATTACH 'arcgis' AS <name> (TYPE vgi, LOCATION '<worker>' [, url '<arcgis url>'] [, precision <n>]
+                           [, token '...' | , username '...', password '...' | , client_id '...', client_secret '...']);
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
 | `url` | none | What to expose as views (see below). Omit it to use only `arcgis_query()`. |
 | `precision` | `7` | Decimal places kept in returned coordinates (ArcGIS `geometryPrecision`), 0–15. 7 is about 1 cm in longitude/latitude; lower values make responses smaller. |
+| `token` | none | A pre-generated ArcGIS token for token-secured services. See [Authentication](#authentication). |
+| `username`, `password` | none | An ArcGIS user; the worker generates and renews tokens. |
+| `client_id`, `client_secret` | none | An ArcGIS OAuth app (client-credentials flow); the worker gets and renews app tokens. |
 
 What the `url` points at decides the layout:
 
@@ -42,10 +47,50 @@ What the `url` points at decides the layout:
 | A services directory, e.g. `…/arcgis/rest/services`, or a folder in it | One schema per FeatureServer/MapServer (folder `/` becomes `_`), one view per layer and table. |
 | A service, `…/FeatureServer` or `…/MapServer` | One view per layer and table, in `main`. |
 | A layer, `…/FeatureServer/0` | One view in `main`. |
+| An ArcGIS Hub / Open Data site, e.g. `https://gis.data.ca.gov` (any page of it that is not a dataset) | One schema per feature or map service in the site's catalog, one view per layer and table. |
+| A Hub dataset page, e.g. `https://<site>/datasets/<itemId>_0` | Resolved to the REST layer or service behind it, then as above. |
 
 When a service has both a FeatureServer and a MapServer, the FeatureServer is used.
 Services are listed when you attach; each schema's views are fetched the first time you use
 them.
+
+### ArcGIS Hub and Open Data sites
+
+```sql
+ATTACH 'arcgis' AS ca (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis-worker',
+                       url 'https://gis.data.ca.gov');
+SELECT count(*) FROM ca.caltrans_districts.district_tiger_lines;   -- 12
+```
+
+A site URL works like a services directory. The worker looks the host up in the Hub API
+(custom domains, `*.hub.arcgis.com` and `*.opendata.arcgis.com` all work), reads the site's
+catalog groups, and lists the Feature Service and Map Service items shared to them. Each
+service becomes a schema named after the item title. Items that point at the same service, or
+at a FeatureServer and its MapServer twin, are listed once (FeatureServer first). The schema
+comment is the title and summary, and the tags carry `arcgis.service_url` and
+`arcgis.item_id`. Duplicate titles are qualified by the item owner, then by the item ID.
+Items without a REST URL (web apps, files, StoryMaps) are skipped. The California State
+Geoportal lists about 2,000 schemas in a second or two. The listing is cached for 5 minutes,
+and views are fetched per schema the first time you use it. A service that is secured,
+moved or down shows up as a schema with no views, and the worker logs a warning.
+
+Dataset pages resolve to the REST URL behind them, both in ATTACH and in `arcgis_query`:
+
+| Dataset URL | Resolved through |
+|---|---|
+| `…/datasets/<itemId>_<n>` (also `/maps/…`, `/items/…`, with `/about`, `/explore`, … suffixes) | The Hub dataset API, giving layer `<n>`. |
+| `…/datasets/<itemId>` | The item's service URL. |
+| `…/datasets/<orgKey>::<slug>`, `…/datasets/<slug>` | The site's search, matching the slug against item titles. When several match, the org key (or the site's own org) decides. If it's still ambiguous, the error lists the candidates. |
+
+```sql
+SELECT count(*) FROM arcgis.main.arcgis_query(
+  'https://gis.data.ca.gov/datasets/CALTRANS::caltrans-districts');                    -- 12
+```
+
+The Hub and portal API roots can be overridden with the `ARCGIS_HUB_API` (default
+`https://hub.arcgis.com`) and `ARCGIS_PORTAL_API` (default
+`https://www.arcgis.com/sharing/rest`) environment variables of the worker process. The
+tests use these to point at the mock.
 
 ### Names
 
@@ -86,9 +131,61 @@ SELECT * FROM arcgis.main.arcgis_query(
 WHERE FIPS = '51580';
 ```
 
-It returns the layer's attribute fields, plus `geometry_geojson` (VARCHAR, WGS84 GeoJSON) for
-layers with geometry. Parse that with `ST_GeomFromGeoJSON(geometry_geojson)`. The views
-already do this, which is why views need the `spatial` and `json` extensions loaded.
+It returns the layer's attribute fields, plus `geometry` (`GEOMETRY`, WGS84
+longitude/latitude) for layers with geometry. The views are `SELECT * FROM arcgis_query(...)`,
+so both push down the same filters.
+
+## Authentication
+
+Services that need an ArcGIS token answer error 499 ("Token Required") or 498 ("Invalid
+Token"). There are two ways to give the worker credentials.
+
+**ATTACH options** apply only to the server of the ATTACH `url` (the same scheme, host and
+port), and need a `url`: without one they would be sent to any host a later `arcgis_query`
+names. They also make a secured directory list its secured services as views. Give one of:
+
+| Options | What happens |
+|---|---|
+| `token` | Sent as is. Not renewed: when it expires, attach again. Generate it with `client=requestip`, or with `referer` `https://github.com/Query-farm/vgi-arcgis`, which the worker sends as its `Referer`. |
+| `username`, `password` | Exchanged for a 60-minute token at the server's token service (`authInfo.tokenServicesUrl` from `<server>/rest/info`: `…/arcgis/tokens/generateToken` on ArcGIS Server, `…/sharing/rest/generateToken` on a portal or ArcGIS Online). A wrong password fails the ATTACH. |
+| `client_id`, `client_secret` | An ArcGIS OAuth app's client-credentials flow at the portal's `/sharing/rest/oauth2/token` (ArcGIS Online for `services.arcgis.com` hosts). Needs ArcGIS Online or an ArcGIS Enterprise portal. |
+
+```sql
+ATTACH 'arcgis' AS gis (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis-worker',
+                        url 'https://gis.example.gov/arcgis/rest/services',
+                        username 'analyst', password getenv('ARCGIS_PASSWORD'));
+```
+
+`getenv()` (DuckDB CLI) keeps the value out of the SQL text and your shell history. The
+options are declared secret: `duckdb_databases()` shows `<redacted>`, and the VGI SDK carries
+them encrypted inside the attach value, never in plaintext.
+
+**A DuckDB secret** of type `arcgis` is used by `arcgis_query` for URLs under its `SCOPE`;
+the longest matching scope wins. It takes `TOKEN`, or `USERNAME` and `PASSWORD`, or
+`CLIENT_ID` and `CLIENT_SECRET`. The type exists once the worker is attached:
+
+```sql
+ATTACH 'arcgis' (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis-worker');
+CREATE SECRET gis (TYPE arcgis, TOKEN getenv('ARCGIS_TOKEN'),
+                   SCOPE 'https://gis.example.gov/arcgis/rest/services/');
+SELECT count(*) FROM arcgis.main.arcgis_query(
+  'https://gis.example.gov/arcgis/rest/services/Utilities/Water/FeatureServer/0');
+```
+
+Always give the secret a `SCOPE`: one without applies to every URL. Catalog listings can't
+read secrets, so a secured service in an attached directory has views only with ATTACH
+credentials; `arcgis_query` works with either. When both apply, the ATTACH credentials win.
+
+How credentials are handled:
+
+- Generated tokens stay in the worker's memory, keyed by token endpoint and a hash of the
+  identity. They are renewed two minutes before they expire, and once more if the server
+  answers 498. They never go into query state, logs or error messages: URLs are logged
+  and reported with `token=<redacted>`.
+- Credentials are sent only over HTTPS (plain HTTP is allowed to `localhost` only).
+- Cached metadata is keyed by identity, so a shared HTTP worker never serves one attach's
+  secured metadata to another.
+- Web-tier authentication (IWA, PKI) and interactive OAuth sign-in are not supported.
 
 ## Columns and types
 
@@ -102,7 +199,8 @@ already do this, which is why views need the `spatial` and `json` extensions loa
 | Date | `TIMESTAMP_MS` |
 
 Raster, Blob, XML and geometry-typed attribute fields are skipped. Each column's comment is
-the field's alias. Geometry is always returned in WGS84 (`outSR=4326`).
+the field's alias. Geometry is always returned in WGS84 (`outSR=4326`), rounded to
+`precision`, as a `GEOMETRY` column named `geometry`.
 
 ## What runs on the server
 
@@ -117,9 +215,32 @@ DuckDB passes the query's filters and its column list to the worker:
   on strings. ArcGIS string comparison depends on the server's database and collation, so
   only translations that can never drop a matching row are sent. The worker then re-applies
   every predicate exactly.
+- **Sent to ArcGIS as a spatial filter:** `geometry && <constant>`, and `ST_Intersects`,
+  `ST_Within`, `ST_Contains`, `ST_ContainsProperly`, `ST_Covers`, `ST_CoveredBy`,
+  `ST_Touches`, `ST_Overlaps`, `ST_Crosses` or `ST_Equals` between `geometry` and a constant
+  geometry. The server returns the features whose envelope meets the constant's envelope
+  (`esriSpatialRelEnvelopeIntersects`), and DuckDB then applies the exact predicate. The
+  envelope is widened slightly before it is sent: by the coordinate rounding step
+  (`precision`) and by 0.5% of its size, because the server reprojects it into the layer's
+  coordinate system. On a layer stored in State Plane, boxes that only touch a feature's
+  envelope lost that feature 20 times in 48 without the margin, and never with it.
+- **Applied by the worker after fetching:** everything else, such as string ranges and `<>`
+  on strings. ArcGIS string comparison depends on the server's database and collation, so
+  only translations that can never drop a matching row are sent. The worker then re-applies
+  every predicate exactly.
 - **Columns:** only the columns the query uses are requested (`outFields`).
-- **Not pushed down:** spatial predicates (`ST_Intersects`, `&&`). A spatial filter or join
-  is evaluated in DuckDB after the layer, or the attribute-filtered part of it, is fetched.
+- **Not pushed down:** spatial joins (the other side is not a constant), `ST_DWithin`,
+  `ST_Disjoint` and `NOT` forms, and spatial filters combined with `OR`.
+
+```sql
+-- Only the parcels near the box are downloaded, not the state's millions.
+SELECT count(*) FROM va.va_base_layers_va_parcels.virginia_parcels
+WHERE ST_Intersects(geometry, ST_MakeEnvelope(-80.005, 37.785, -79.99, 37.795));
+```
+
+Deriving the box from `ST_Intersects` and the other exact predicates needs VGI `fd85f2e`
+or later (stock DuckDB gets it from the `query_farm` repository). Older VGI builds push only
+an explicit `geometry && <constant>`.
 
 ## Paging
 
@@ -137,12 +258,22 @@ metadata is cached for 5 minutes.
 
 ## Limitations
 
-- **Public services only.** Token-secured services are not supported yet. In a directory,
-  a service that requires a token (ArcGIS error 498/499, HTTP 401/403) appears as a schema
-  with no views, and the worker logs a warning.
-- **ArcGIS REST URLs only.** ArcGIS Hub / Open Data site URLs are rejected. Use the REST
-  services directory behind the site; Hub datasets point at those layers.
-- **No spatial pushdown** (see above).
+- **Token-secured services need credentials** (see [Authentication](#authentication)). In
+  a directory attached without them, or whose credentials a service rejects (ArcGIS error
+  498/499, HTTP 401/403), that service appears as a schema with no views and the worker
+  logs a warning. Web-tier (IWA/PKI) authentication is not supported. ATTACH credentials
+  apply only to the ATTACH `url`'s own server, so a Hub site's items, which usually live on
+  other servers, are read anonymously; use `arcgis_query` with a scoped `arcgis` secret for
+  secured ones.
+- **Hub sites:** only catalogs defined by groups are read (current `catalogV2` sites and
+  older `catalog.groups` sites). The search API stops at 10,000 items. Slug URLs are matched
+  against item titles because no public API resolves slugs. If one fails, use the
+  `<itemId>_<n>` form or the REST URL. Other non-REST URLs are rejected unless their host
+  is a Hub site.
+- **Listing every view of a Hub site is slow.** `duckdb_views()`, `SHOW TABLES` and
+  `information_schema` walk every schema of every attached database. On a site with
+  thousands of services, that fetches the metadata of each one, from many different servers.
+  Query views by name, or attach a single dataset or service instead.
 - **Imagery and other services** (ImageServer, GeocodeServer, GPServer) are skipped.
 - **DuckDB 2.0 axis order.** Geometry is longitude/latitude. Spheroid functions such as
   `ST_Area_Spheroid` need `SET geometry_always_xy = true` (the default from DuckDB 2.1).
@@ -190,6 +321,8 @@ Stock DuckDB 2.0.0 (VGI from the `query_farm` repository) and Haybarn 2.0.0rc11:
 | NYS GIS (`gisservices.its.ny.gov`) | ArcGIS Server 10.81, 22 services | 62 counties, 141,343 km² |
 | USGS National Map (`index.nationalmap.gov`) | ArcGIS 11.3, index layers | 22 HU2 hydrologic regions |
 | Caltrans, a California State Geoportal (Hub) dataset, by its layer URL | ArcGIS Server | 12 districts |
+| [California State Geoportal](https://gis.data.ca.gov) (Hub site, custom domain) | ArcGIS Hub, `catalogV2`, 44 groups | 1,999 schemas; 12 Caltrans districts via the site schema, the `CALTRANS::caltrans-districts` slug and `<itemId>_0`; a CAL FIRE MapServer `<itemId>_0` dataset |
+| [DataHub DC](https://opendata.dc.gov) (Hub site) | ArcGIS Hub, `catalogV2`, 53 groups | 1,502 schemas |
 
 ## Testing
 
@@ -199,12 +332,16 @@ make check     # lint, unit tests, SQL tests over stdio/launch/HTTP, metadata li
 
 The SQL tests run against `test/mock_api/server.py`, an offline mock of the ArcGIS REST API.
 It covers paging modes, filters, multipolygons with holes, an Esri-JSON-only layer, a
-non-spatial table, a legacy server, and throttling (429 on first request). Nothing in
+non-spatial table, a legacy server, and throttling (429 on first request). It also mocks the
+ArcGIS Hub and sharing APIs: domain lookup, both site catalog formats, paged search, dataset
+IDs and the site search used for slugs. Nothing in
 `make check` touches the network.
 `vgi-agent-tests.yaml` holds live tasks against Virginia's VGIN services.
 
 `src/` layout: `catalog.ts` (ATTACH and views), `discovery.ts` (walking directories and
-services), `query.ts` (`arcgis_query`), `where.ts` (filter translation), `esri.ts`
+services), `hub.ts` (Hub site and dataset URLs), `query.ts` (`arcgis_query`), `where.ts`
+(attribute filter translation), `spatial.ts` (spatial filter translation), `wkb.ts`
+(GeoJSON → WKB, WKB boxes), `esri.ts`
 (metadata, types, Esri JSON → GeoJSON), `http.ts` (retries, caching), `options.ts`.
 
 ## Support

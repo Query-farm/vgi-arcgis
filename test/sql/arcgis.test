@@ -8,8 +8,8 @@ require-env ARCGIS_WORKER
 
 require-env ARCGIS_MOCK_API
 
-# The views use ST_GeomFromGeoJSON (spatial + json). Normal DuckDB sessions
-# autoload both; this runner does not.
+# The tests use spatial functions (ST_AsText, ST_Intersects, ...). Normal DuckDB
+# sessions autoload spatial and json; this runner does not.
 statement ok
 LOAD spatial;
 
@@ -34,10 +34,10 @@ ORDER BY OBJECTID;
 5	C'1	51005	0.123456789	2021	1	1970-02-10
 
 query T
-SELECT typeof(OBJECTID) || ',' || typeof(ACRES) || ',' || typeof(FLOORS) || ',' || typeof(UPDATED) || ',' || typeof(geometry_geojson)
+SELECT typeof(OBJECTID) || ',' || typeof(ACRES) || ',' || typeof(FLOORS) || ',' || typeof(UPDATED) || ',' || typeof(geometry)
 FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0') LIMIT 1;
 ----
-INTEGER,DOUBLE,SMALLINT,TIMESTAMP_MS,VARCHAR
+INTEGER,DOUBLE,SMALLINT,TIMESTAMP_MS,GEOMETRY
 
 query I
 SELECT count(*) FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0');
@@ -90,9 +90,9 @@ WHERE PARCEL_ID >= 'B' AND PARCEL_ID < 'C' ORDER BY 1;
 B-1
 B-2
 
-# GeoJSON passes through, rounded to the default precision of 7 decimals.
+# Geometry, rounded to the default precision of 7 decimals.
 query T
-SELECT ST_AsText(ST_GeomFromGeoJSON(geometry_geojson))
+SELECT ST_AsText(geometry)
 FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
 WHERE OBJECTID = 5;
 ----

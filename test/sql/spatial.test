@@ -1,0 +1,107 @@
+# name: test/sql/spatial.test
+# description: Spatial filter pushdown: `geometry && <box>` becomes an ArcGIS
+#              envelope-intersects query, and results stay exact.
+# group: [arcgis]
+
+require vgi
+
+require-env ARCGIS_WORKER
+
+require-env ARCGIS_MOCK_API
+
+statement ok
+LOAD spatial;
+
+statement ok
+ATTACH 'arcgis' AS svc (TYPE vgi, LOCATION '{ARCGIS_WORKER}',
+    url '{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer');
+
+# Parcels: A-1 [0,1]x[0,1], A-2 [1,2]x[0,1], B-1 [0,3]x[2,5] (with a hole),
+# B-2 two squares at (10,10) and (20,20), C'1 near (-77.1, 38).
+
+# The box reaches the worker as a filter on the scan.
+query II
+EXPLAIN SELECT PARCEL_ID FROM svc.main.tax_parcels WHERE geometry && ST_MakeEnvelope(0.5, 0.5, 1.5, 0.9);
+----
+physical_plan	<REGEX>:(?s).*(&&|st_intersects_extent).*
+
+# Envelopes that meet the box, boundaries included.
+query T
+SELECT PARCEL_ID FROM svc.main.tax_parcels WHERE geometry && ST_MakeEnvelope(0.5, 0.5, 1.5, 0.9) ORDER BY 1;
+----
+A-1
+A-2
+
+query T
+SELECT PARCEL_ID FROM svc.main.tax_parcels WHERE geometry && ST_MakeEnvelope(2, 1, 2.5, 2) ORDER BY 1;
+----
+A-2
+B-1
+
+# A multipolygon's envelope spans the gap between its parts: && keeps it, the
+# exact predicate does not.
+query T
+SELECT PARCEL_ID FROM svc.main.tax_parcels WHERE geometry && ST_MakeEnvelope(15, 15, 16, 16) ORDER BY 1;
+----
+B-2
+
+query I
+SELECT count(*) FROM svc.main.tax_parcels WHERE ST_Intersects(geometry, ST_MakeEnvelope(15, 15, 16, 16));
+----
+0
+
+# Exact predicates give the same answers as an unfiltered scan. (1.5, 3.5) is in
+# B-1's hole: its box matches, the exact predicate does not.
+query I
+SELECT count(*) FROM svc.main.tax_parcels WHERE ST_Intersects(geometry, ST_Point(1.5, 3.5));
+----
+0
+
+query T
+SELECT PARCEL_ID FROM svc.main.tax_parcels WHERE ST_Intersects(geometry, ST_Point(0.5, 2.5)) ORDER BY 1;
+----
+B-1
+
+query T
+SELECT PARCEL_ID FROM svc.main.tax_parcels WHERE ST_Within(geometry, ST_MakeEnvelope(-1, -1, 2.5, 1.5)) ORDER BY 1;
+----
+A-1
+A-2
+
+query I
+SELECT
+  (SELECT count(*) FROM svc.main.tax_parcels WHERE ST_Intersects(geometry, ST_MakeEnvelope(0.9, 0.9, 1.1, 2.1)))
+  =
+  (SELECT count(*) FROM (FROM svc.main.tax_parcels LIMIT 1000) WHERE ST_Intersects(geometry, ST_MakeEnvelope(0.9, 0.9, 1.1, 2.1)));
+----
+true
+
+# With an attribute filter too; and through arcgis_query directly.
+query T
+SELECT PARCEL_ID FROM svc.main.tax_parcels WHERE geometry && ST_MakeEnvelope(0, 0, 3, 3) AND FIPS = '51003' ORDER BY 1;
+----
+B-1
+
+query T
+SELECT PARCEL_ID FROM svc.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0')
+WHERE geometry && ST_MakeEnvelope(10.5, 10.5, 20.5, 20.5) ORDER BY 1;
+----
+B-2
+
+# Points from a JSON-only layer (Esri JSON converted), and a box with no matches.
+query T
+SELECT ADDRESS FROM svc.main.address_points WHERE geometry && ST_MakeEnvelope(-78.495, 38.0, -78.47, 38.025) ORDER BY 1;
+----
+2 Oak Ave
+3 Elm Rd
+
+query I
+SELECT count(*) FROM svc.main.address_points WHERE geometry && ST_MakeEnvelope(0, 0, 1, 1);
+----
+0
+
+# Nothing projected but the count: the filter still applies (A-2 touches at x = 1).
+query I
+SELECT count(*) FROM svc.main.tax_parcels WHERE geometry && ST_MakeEnvelope(0, 0, 1, 1);
+----
+2

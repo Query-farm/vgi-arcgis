@@ -13,7 +13,7 @@
 import { field, type VgiDataType, type VgiField } from "@query-farm/vgi";
 
 export const CATALOG_NAME = "arcgis";
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 export const SOURCE_URL = "https://github.com/Query-farm/vgi-arcgis";
 
@@ -67,11 +67,24 @@ export const CATALOG_DOC_LLM =
   "Query ArcGIS REST feature services (FeatureServer and MapServer layers, as published by state and " +
   "local governments through ArcGIS Server, ArcGIS Online and ArcGIS Hub) from DuckDB SQL. " +
   "`main.arcgis_query(url)` reads one layer or table: attribute fields become typed columns and geometry " +
-  "arrives as GeoJSON text (`geometry_geojson`, WGS84). Attach with a `url` option to get views instead: " +
+  "becomes a `geometry` GEOMETRY column (WGS84). Attach with a `url` option to get views instead: " +
   "a services directory URL gives one schema per service and one view per layer, a service URL gives one " +
-  "view per layer in `main`, a layer URL gives one view. Views expose a GEOMETRY column (via DuckDB spatial). " +
-  "Simple WHERE predicates run on the ArcGIS server and results page automatically; the `precision` " +
-  "ATTACH option (default 7) sets how many decimals coordinates keep. Data is read live on every query.";
+  "view per layer in `main`, a layer URL gives one view. An ArcGIS Hub / Open Data site URL (e.g. " +
+  "`https://gis.data.ca.gov`) works like a services directory: one schema per feature or map service in the " +
+  "site's catalog, named after the item title. A Hub dataset page URL (`https://<site>/datasets/<itemId>_<n>`, " +
+  "`.../datasets/<itemId>` or `.../datasets/<orgKey>::<slug>`) is resolved to the REST layer or service " +
+  "behind it, in ATTACH and in `arcgis_query`. Simple WHERE predicates and spatial filters against a " +
+  "constant (`geometry && <box>`, ST_Intersects, ST_Within, ...) run on the ArcGIS server, and results " +
+  "page automatically; the `precision` " +
+  "ATTACH option (default 7) sets how many decimals coordinates keep. Data is read live on every query. " +
+  "Token-secured services need credentials: the secret ATTACH options `token`, `username` + `password` or " +
+  "`client_id` + `client_secret` (an ArcGIS OAuth app) apply to the ATTACH `url`'s server, and list its secured " +
+  "services as views. Or create a DuckDB secret of type `arcgis` (fields TOKEN, or USERNAME and PASSWORD, or " +
+  "CLIENT_ID and CLIENT_SECRET, plus a SCOPE URL prefix), which `arcgis_query` uses for URLs under the scope " +
+  "but which catalog listings cannot see:\n\n" +
+  "```sql\nCREATE SECRET gis (TYPE arcgis, TOKEN getenv('ARCGIS_TOKEN'), " +
+  "SCOPE 'https://gis.example.gov/arcgis/rest/services/');\n```\n\n" +
+  "ATTACH credentials win over a secret. Errors 498/499 mean a missing, invalid or expired token.";
 
 export const CATALOG_DOC_MD =
   "# VGI ArcGIS worker\n\n" +
@@ -79,21 +92,34 @@ export const CATALOG_DOC_MD =
   "option and every feature layer it finds becomes a view with a `GEOMETRY` column.\n\n" +
   "- `url` a services directory (`.../arcgis/rest/services`, one schema per service), a service " +
   "(`.../FeatureServer`, one view per layer) or a single layer (`.../FeatureServer/0`).\n" +
+  "- `url` may also be an ArcGIS Hub / Open Data site (`https://gis.data.ca.gov`, one schema per service " +
+  "in its catalog) or one of its dataset pages (`.../datasets/<itemId>_0`, resolved to the REST layer).\n" +
   "- `precision` decimal places kept in coordinates (default 7, about 1 cm).\n" +
-  "- `arcgis.main.arcgis_query(url)` reads any layer by URL without attaching it.\n\n" +
-  "Simple filters (numeric comparisons, string equality and IN, IS NULL, prefix matches) run on the " +
-  "ArcGIS server; every filter is also applied exactly in the worker. Geometry is parsed by DuckDB spatial.";
+  "- `arcgis.main.arcgis_query(url)` reads any layer by URL without attaching it.\n" +
+  "- Token-secured services: ATTACH with `token`, `username` + `password`, or `client_id` + `client_secret` " +
+  "(secret options, redacted from `duckdb_databases()`), or create an `arcgis` secret scoped to a URL prefix " +
+  "for `arcgis_query`. Generated tokens are renewed automatically. In the DuckDB CLI, `getenv()` keeps a " +
+  "credential out of the SQL text:\n\n" +
+  "```sql\nATTACH 'arcgis' AS gis (TYPE vgi, LOCATION '/path/to/vgi-arcgis-worker',\n" +
+  "  url 'https://gis.example.gov/arcgis/rest/services', token getenv('ARCGIS_TOKEN'));\n" +
+  "CREATE SECRET gis_token (TYPE arcgis, TOKEN getenv('ARCGIS_TOKEN'),\n" +
+  "  SCOPE 'https://gis.example.gov/arcgis/rest/services/');\n```\n\n" +
+  "Simple filters (numeric comparisons, string equality and IN, IS NULL, prefix matches) and spatial " +
+  "filters against a constant (`geometry && <box>`, `ST_Intersects`, `ST_Within`, ...) run on the ArcGIS " +
+  "server; every filter is also applied exactly in the worker.";
 
 export const SCHEMA_DOC_LLM =
   "The `main` schema holds `arcgis_query(url)`, which reads one ArcGIS layer or table by URL, plus, when " +
-  "the catalog was attached with a service or layer `url`, one view per layer.";
+  "the catalog was attached with a service or layer `url`, one view per layer. For a token-secured layer, " +
+  "`arcgis_query` uses the catalog's ATTACH credentials when they cover the URL's server, else the `arcgis` " +
+  "secret whose SCOPE is the longest prefix of the URL.";
 
 export const SCHEMA_DOC_MD =
   "## main\n\n" +
   "The entry point of the ArcGIS worker.\n\n" +
   "- `arcgis_query(url)`: every feature of one ArcGIS layer or table, paged automatically.\n" +
   "- Views over the attached service's layers, when the catalog was attached with a service or layer `url`.\n\n" +
-  "Attach with a services directory `url` to get one schema per service instead.";
+  "Attach with a services directory or ArcGIS Hub site `url` to get one schema per service instead.";
 
 export const AGENT_TEST_TASKS = [
   {
