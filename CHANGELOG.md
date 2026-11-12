@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+
+- Speaks VGI protocol 3.3 (`@query-farm/vgi` 0.50.0) and requires the current VGI DuckDB
+  extension; 3.2 extensions are incompatible. No change to the SQL surface.
+
 ## 0.4.0
 
 Breaking: `arcgis_query` returns `geometry` (`GEOMETRY`) instead of `geometry_geojson`
