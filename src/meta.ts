@@ -151,7 +151,7 @@ export const AGENT_TEST_TASKS = [
   {
     name: "server_statistics",
     prompt:
-      "Using https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1, count non-null OBJECTID values grouped by STATE for New York (36), computing the statistic on the server.",
+      "Using https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1, count non-null OBJECTID values grouped by STATE for New York (36), computing the statistic on the server. Return exactly the columns group_value and statistic_value, ordered by group_value.",
   },
   {
     name: "imagery_sampling",
@@ -170,7 +170,7 @@ export const AGENT_TEST_TASKS = [
     prompt:
       "Using the cities and counties layer at " +
       "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1, " +
-      "which is larger by area: Covington or Buena Vista?",
+      "which is larger by area: Covington or Buena Vista? Return only the winning city's NAME column.",
   },
 ];
 
