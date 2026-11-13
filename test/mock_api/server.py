@@ -296,6 +296,14 @@ SERVICES = {
         "tables": {},
     },
 }
+# Additional regression services are deliberately absent from the directory listing.
+for service_name, mode in [("LegacyIds", "ids"), ("Sparse", "sparse")]:
+    layer = _layer(0, service_name, "Feature Layer", LEGACY_FIELDS, "esriGeometryPoint", "JSON",
+                   order_by=False, pagination=mode == "sparse")
+    layer["_paging_test"] = mode
+    SERVICES[(service_name, "MapServer")] = {"layers": {0: (layer,
+        [({"OBJECTID": o, "KIND": k}, {"x": p[0], "y": p[1]}, None) for o, k, p in LEGACY])}, "tables": {}}
+
 # Directory listing extras the worker must skip or de-duplicate.
 DIRECTORY = {
     "": {"folders": ["Demo"], "services": [{"name": "Roads", "type": "MapServer"},
@@ -669,6 +677,16 @@ class Handler(BaseHTTPRequestHandler):
                     AUTH_LOG["rejected"] += 1
                 self._error(failure[1], failure[0])
                 return
+        if rest.endswith("ImageServer/getSamples"):
+            points = json.loads(q["geometry"])["points"]
+            if len(points) > 100 or q.get("returnFirstValueOnly") != "true":
+                self._error("Use batches of at most 100 points and first value only")
+                return
+            samples = [{"locationId": i, "location": {"x": x, "y": y, "spatialReference": {"wkid": 4326}},
+                        "value": "NoData" if y == 90 else ("1, 2, 3" if x == 2 else str(x * 10 + y)),
+                        "rasterId": 7, "resolution": 1} for i, (x, y) in enumerate(points) if x != 0]
+            self._send(200, {"samples": samples})
+            return
         m = re.fullmatch(r"(.+)/(FeatureServer|MapServer)(?:/(\d+))?(/query)?", rest)
         if not m or (m.group(1), m.group(2)) not in SERVICES:
             self._error("Service not found", 404)
@@ -790,6 +808,51 @@ class Handler(BaseHTTPRequestHandler):
             rows = [f for f in rows if _envelopes_meet(_feature_envelope(f), envelope)]
         if q.get("returnCountOnly", "false").lower() == "true":
             self._send(200, {"count": len(rows)})
+            return
+        if q.get("outStatistics"):
+            specs = json.loads(q["outStatistics"])
+            group = q.get("groupByFieldsForStatistics")
+            groups = {}
+            if not group:
+                groups[None] = rows
+            else:
+                for feature in rows:
+                    groups.setdefault(feature[0].get(group), []).append(feature)
+            result = []
+            for key, members in groups.items():
+                attrs = {group: key} if group else {}
+                for spec in specs:
+                    vals = [f[0].get(spec["onStatisticField"]) for f in members]
+                    vals = [v for v in vals if v is not None]
+                    kind = spec["statisticType"]
+                    value = None
+                    if kind == "count": value = len(vals)
+                    elif vals:
+                        if kind == "sum": value = sum(vals)
+                        elif kind == "min": value = min(vals)
+                        elif kind == "max": value = max(vals)
+                        elif kind == "avg": value = sum(vals) / len(vals)
+                        else:
+                            self._error("unsupported mock statistic")
+                            return
+                    attrs[spec["outStatisticFieldName"]] = value
+                result.append({"attributes": attrs})
+            self._send(200, {"features": result[:MAX_RECORDS], "exceededTransferLimit": len(result) > MAX_RECORDS})
+            return
+        if q.get("returnIdsOnly") == "true" and meta.get("_paging_test") == "ids":
+            # Unordered IDs and a duplicate: clients must sort and de-duplicate.
+            ids = [f[0]["OBJECTID"] for f in reversed(rows)]
+            self._send(200, {"objectIds": ids + ids[:1], "objectIdFieldName": "OBJECTID"})
+            return
+        if "objectIds" in q:
+            ids = {int(v) for v in q["objectIds"].split(",")}
+            rows = [f for f in rows if f[0]["OBJECTID"] in ids]
+        if meta.get("_paging_test") == "sparse":
+            # The spatial index scans a candidate window before applying its filter.
+            offset = int(q.get("resultOffset", "0"))
+            page = [] if offset == 0 else rows[:1] if offset == 2 else rows[1:] if offset == 4 else []
+            self._send(200, {"features": [{"attributes": a, "geometry": g} for a, g, _ in page],
+                             "exceededTransferLimit": offset < 4})
             return
         order = q.get("orderByFields")
         adv = meta["advancedQueryCapabilities"]

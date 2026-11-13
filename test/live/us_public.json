@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "description": "Optional integration examples using public U.S. ArcGIS services.",
+  "checks": [
+    {
+      "name": "Census state count",
+      "sql": "SELECT feature_count BETWEEN 50 AND 60 FROM arcgis.main.arcgis_count('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/0')",
+      "rows": [
+        [
+          true
+        ]
+      ]
+    },
+    {
+      "name": "Census county feature scan",
+      "sql": "SELECT count(*) FROM arcgis.main.arcgis_query('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1') WHERE STATE = '36'",
+      "rows": [
+        [
+          62
+        ]
+      ]
+    },
+    {
+      "name": "Census server-side count",
+      "sql": "SELECT feature_count FROM arcgis.main.arcgis_count('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', where_clause := 'STATE = ''36''')",
+      "rows": [
+        [
+          62
+        ]
+      ]
+    },
+    {
+      "name": "Census grouped server statistics",
+      "sql": "SELECT group_value, statistic_value FROM arcgis.main.arcgis_statistics('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', 'OBJECTID', statistic := 'count', group_by := 'STATE', where_clause := 'STATE = ''36''') ORDER BY group_value",
+      "rows": [
+        [
+          "36",
+          62.0
+        ]
+      ]
+    },
+    {
+      "name": "USGS hydrologic regions",
+      "sql": "SELECT count(*) FROM arcgis.main.arcgis_query('https://index.nationalmap.gov/arcgis/rest/services/NHDPlus_HR_Index/MapServer/0')",
+      "rows": [
+        [
+          22
+        ]
+      ]
+    },
+    {
+      "name": "NOAA stations and geometry",
+      "sql": "SELECT count(*), bool_and(stationname IS NOT NULL AND geometry IS NOT NULL) FROM (SELECT stationname, geometry FROM arcgis.main.arcgis_query('https://mapservices.weather.noaa.gov/vector/rest/services/obs/surface_obs/MapServer/10') LIMIT 3)",
+      "rows": [
+        [
+          3,
+          true
+        ]
+      ]
+    },
+    {
+      "name": "FEMA spatial feature query",
+      "sql": "SELECT count(*) > 0, bool_and(FLD_ZONE IS NOT NULL AND geometry IS NOT NULL) FROM (SELECT FLD_ZONE, geometry FROM arcgis.main.arcgis_query('https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28') WHERE ST_Intersects(geometry, ST_MakeEnvelope(-77.05,38.85,-77.04,38.86)) LIMIT 3)",
+      "rows": [
+        [
+          true,
+          true
+        ]
+      ]
+    },
+    {
+      "name": "FEMA server count by bounding box",
+      "sql": "SELECT feature_count > 0 FROM arcgis.main.arcgis_count('https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28', bbox := '-77.05,38.85,-77.04,38.86')",
+      "rows": [
+        [
+          true
+        ]
+      ]
+    },
+    {
+      "name": "USGS elevation sampling",
+      "sql": "SELECT count(*), bool_and(TRY_CAST(value AS DOUBLE) BETWEEN 0 AND 100) FROM arcgis.main.arcgis_sample('https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer', '[[-77.0365,38.8977],[-77.04,38.90]]')",
+      "rows": [
+        [
+          2,
+          true
+        ]
+      ]
+    }
+  ]
+}

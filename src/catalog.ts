@@ -23,11 +23,13 @@ import { ARCGIS_SECRET_TYPE, ArcgisAuth, assertSecureTransport, attachAuth, cred
 import { type DiscoveredSchema, type DiscoveredView, directorySchemas, mainViews, serviceViews } from "./discovery.ts";
 import type { RequestAuth } from "./http.ts";
 import { hubSiteSchemas, itemViews, resolveUrl } from "./hub.ts";
+import { arcgisSample } from "./imagery.ts";
 import { CATALOG_DOC_MD, CATALOG_NAME, CATALOG_TAGS, SCHEMA_DOC_MD, SCHEMA_TAGS, SOURCE_URL } from "./meta.ts";
 import { ATTACH_OPTIONS, decodeSettings, encodeSettings, settingsFromOptions } from "./options.ts";
 import { arcgisQuery } from "./query.ts";
+import { arcgisCount, arcgisStatistics } from "./summary.ts";
 
-export const FUNCTIONS: VgiFunction[] = [arcgisQuery];
+export const FUNCTIONS: VgiFunction[] = [arcgisQuery, arcgisCount, arcgisStatistics, arcgisSample];
 
 interface Example {
   description: string;

@@ -1,8 +1,7 @@
 # Private graders for the public vgi.agent_test_tasks in the worker's catalog metadata.
 # `vgi-lint lint --ai` runs an agent on each prompt and grades it with check_sql.
 # See https://github.com/Query-farm/vgi-lint-check (VGI920).
-# Both tasks read live VGIN (Virginia) ArcGIS services, so the graders check
-# ranges rather than exact counts.
+# These example tasks read live ArcGIS services; graders use ranges where results change.
 tasks:
   - name: covington_parcels
     check_sql: >-
@@ -13,3 +12,13 @@ tasks:
     reference_sql: >-
       SELECT NAME FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1')
       WHERE NAME IN ('Covington', 'Buena Vista') ORDER BY AREASQMI DESC LIMIT 1
+  - name: server_count
+    reference_sql: >-
+      SELECT feature_count FROM arcgis.main.arcgis_count('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', where_clause := 'STATE = ''36''')
+  - name: server_statistics
+    reference_sql: >-
+      SELECT group_value, statistic_value FROM arcgis.main.arcgis_statistics('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', 'OBJECTID', statistic := 'count', group_by := 'STATE', where_clause := 'STATE = ''36''') ORDER BY group_value
+  - name: imagery_sampling
+    check_sql: >-
+      SELECT count(*) = 1 AND bool_and(TRY_CAST(value AS DOUBLE) BETWEEN 0 AND 100)
+      FROM arcgis.main.arcgis_sample('https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer', '[[-77.0365,38.8977]]')

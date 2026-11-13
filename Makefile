@@ -9,9 +9,10 @@ WORKER          := $(CURDIR)/bin/vgi-arcgis-worker
 TOOLS           := $(CURDIR)/.tools
 HAYBARN_UNITTEST := $(TOOLS)/bin/haybarn-unittest
 TRANSPORT       ?= stdio
+LIVE_CASES      ?=
 
 .DEFAULT_GOAL := help
-.PHONY: help build test test-unit test-sql test-sql-all lint lint-explain lint-ai fmt check run run-http debug tools template-diff clean
+.PHONY: help build test test-unit test-sql test-sql-all test-live lint lint-explain lint-ai fmt check run run-http debug tools template-diff clean
 
 help: ## List the targets
 	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z_-]+:.*## /{printf "  %-14s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
@@ -42,6 +43,10 @@ test-sql-all: ## SQL tests over every transport
 	$(MAKE) test-sql TRANSPORT=http
 
 test: test-unit test-sql ## Unit + SQL tests
+
+test-live: build ## Live SQL checks: LIVE_CASES=<JSON path> (network required)
+	@test -n "$(LIVE_CASES)" || { echo "Set LIVE_CASES to a live-test JSON file." >&2; exit 2; }
+	uv run --no-project --with duckdb==2.0.0 python scripts/test_live.py --cases "$(LIVE_CASES)"
 
 lint-explain: build ## Metadata quality report (vgi-lint, settings in vgi-lint.toml). LINT_ARGS="--format agent" for agents
 	$(VGI_LINT) "$(WORKER)" $(LINT_ARGS)

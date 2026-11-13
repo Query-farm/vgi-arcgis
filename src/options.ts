@@ -28,7 +28,7 @@ export const ATTACH_OPTIONS: AttachOptionSpec[] = [
       "a service (.../FeatureServer or .../MapServer) or a single layer (.../FeatureServer/0); " +
       "or an ArcGIS Hub / Open Data site (https://<site>, one schema per service in its catalog) or " +
       "one of its dataset pages (https://<site>/datasets/<id>, resolved to the REST layer or service). " +
-      "Omit it to use only the arcgis_query() table function.",
+      "Omit it to use the ArcGIS query, summary and imagery functions without catalog views.",
     type: utf8(),
   },
   {

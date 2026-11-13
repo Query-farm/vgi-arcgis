@@ -10,10 +10,10 @@
  *   `SCHEMA_CATEGORIES`, search keywords, and LLM- and human-facing docs.
  */
 
-import { field, type VgiDataType, type VgiField } from "@query-farm/vgi";
+import { field, type VgiDataType, type VgiField, type VgiSchema } from "@query-farm/vgi";
 
 export const CATALOG_NAME = "arcgis";
-export const VERSION = "0.5.0";
+export const VERSION = "0.6.0";
 
 export const SOURCE_URL = "https://github.com/Query-farm/vgi-arcgis";
 
@@ -25,7 +25,7 @@ export const SCHEMA_CATEGORIES = [
   {
     name: "arcgis",
     title: "ArcGIS REST",
-    description: "Table functions that read ArcGIS FeatureServer and MapServer layers.",
+    description: "ArcGIS feature queries and summaries, and ImageServer pixel sampling.",
   },
 ] as const;
 
@@ -63,9 +63,25 @@ export function column(name: string, type: VgiDataType, comment: string, nullabl
   return field(name, type, nullable, new Map([["comment", comment]]));
 }
 
+/** Static result metadata reuses the Arrow fields' descriptions. */
+export function resultColumns(output: VgiSchema, types: string[]): string {
+  return JSON.stringify(
+    output.fields.map((f, i) => ({ name: f.name, type: types[i], description: f.metadata?.get("comment") ?? "" })),
+  );
+}
+
+const SERVICE_DOC =
+  "Query live ArcGIS services from user-supplied URLs, for public agencies and organizations worldwide. " +
+  "Feature scans support attribute and spatial filters. Explicit server-side counts and grouped " +
+  "numeric summaries avoid downloading whole layers; their source filters use ArcGIS SQL and spatial " +
+  "semantics. Imagery access samples pixel values at batches of WGS84 points, retaining multiband " +
+  "and NoData values as text. Raster files are not downloaded or exposed as feature views. " +
+  "Public services need no credentials; secured services use scoped ArcGIS secrets. ";
+
 export const CATALOG_DOC_LLM =
-  "Query ArcGIS REST feature services (FeatureServer and MapServer layers, as published by state and " +
-  "local governments through ArcGIS Server, ArcGIS Online and ArcGIS Hub) from DuckDB SQL. " +
+  SERVICE_DOC +
+  "Query ArcGIS REST feature services (FeatureServer and MapServer layers published through " +
+  "ArcGIS Server, ArcGIS Online and ArcGIS Hub) from DuckDB SQL. " +
   "`main.arcgis_query(url)` reads one layer or table: attribute fields become typed columns and geometry " +
   "becomes a `geometry` GEOMETRY column (WGS84). Attach with a `url` option to get views instead: " +
   "a services directory URL gives one schema per service and one view per layer, a service URL gives one " +
@@ -87,6 +103,8 @@ export const CATALOG_DOC_LLM =
   "ATTACH credentials win over a secret. Errors 498/499 mean a missing, invalid or expired token.";
 
 export const CATALOG_DOC_MD =
+  SERVICE_DOC +
+  "\n\n" +
   "# VGI ArcGIS worker\n\n" +
   "**Query live ArcGIS FeatureServer and MapServer layers from DuckDB SQL.** Attach the worker with a `url` " +
   "option and every feature layer it finds becomes a view with a `GEOMETRY` column.\n\n" +
@@ -109,12 +127,15 @@ export const CATALOG_DOC_MD =
   "server; every filter is also applied exactly in the worker.";
 
 export const SCHEMA_DOC_LLM =
+  SERVICE_DOC +
   "The `main` schema holds `arcgis_query(url)`, which reads one ArcGIS layer or table by URL, plus, when " +
   "the catalog was attached with a service or layer `url`, one view per layer. For a token-secured layer, " +
   "`arcgis_query` uses the catalog's ATTACH credentials when they cover the URL's server, else the `arcgis` " +
   "secret whose SCOPE is the longest prefix of the URL.";
 
 export const SCHEMA_DOC_MD =
+  SERVICE_DOC +
+  "\n\n" +
   "## main\n\n" +
   "The entry point of the ArcGIS worker.\n\n" +
   "- `arcgis_query(url)`: every feature of one ArcGIS layer or table, paged automatically.\n" +
@@ -122,6 +143,21 @@ export const SCHEMA_DOC_MD =
   "Attach with a services directory or ArcGIS Hub site `url` to get one schema per service instead.";
 
 export const AGENT_TEST_TASKS = [
+  {
+    name: "server_count",
+    prompt:
+      "Count New York counties at https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1 using a server-side count without downloading features. New York's STATE FIPS is 36.",
+  },
+  {
+    name: "server_statistics",
+    prompt:
+      "Using https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1, count non-null OBJECTID values grouped by STATE for New York (36), computing the statistic on the server.",
+  },
+  {
+    name: "imagery_sampling",
+    prompt:
+      "Sample elevation in meters at longitude -77.0365, latitude 38.8977 from https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer using the imagery function.",
+  },
   {
     name: "covington_parcels",
     prompt:
@@ -140,7 +176,7 @@ export const AGENT_TEST_TASKS = [
 
 export const CATALOG_TAGS: Record<string, string> = {
   "vgi.title": "ArcGIS REST Feature Services",
-  "vgi.subtitle": "Live SQL access to ArcGIS FeatureServer and MapServer layers, with filter pushdown.",
+  "vgi.subtitle": "Live ArcGIS feature queries, server summaries and raster sampling from service URLs worldwide.",
   "vgi.doc_llm": CATALOG_DOC_LLM,
   "vgi.doc_md": CATALOG_DOC_MD,
   "vgi.source_url": SOURCE_URL,
@@ -155,6 +191,13 @@ export const CATALOG_TAGS: Record<string, string> = {
   "vgi.support_policy_url": `${SOURCE_URL}#support`,
   // Public analyst tasks for `vgi-lint simulate`; private graders live in vgi-agent-tests.yaml.
   "vgi.agent_test_tasks": JSON.stringify(AGENT_TEST_TASKS),
+  "vgi.executable_examples": JSON.stringify([
+    {
+      description: "Empty point input returns no samples without contacting a service",
+      sql: "SELECT count(*) AS sample_count FROM arcgis.main.arcgis_sample('https://example.org/arcgis/rest/services/Elevation/ImageServer', '[]') ORDER BY sample_count",
+      expected_result: [[0]],
+    },
+  ]),
 };
 
 export const SCHEMA_TAGS: Record<string, string> = {

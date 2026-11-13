@@ -25,6 +25,9 @@ It is built on [VGI](https://query.farm/vgi), which lets DuckDB call a worker pr
 it were part of the database. Nothing is copied ahead of time: every query reads the
 service live.
 
+The worker accepts compatible ArcGIS service URLs from any country or organization.
+It has no built-in country or agency presets; geographic endpoints below are examples.
+
 ## Attaching
 
 ```sql
@@ -34,7 +37,7 @@ ATTACH 'arcgis' AS <name> (TYPE vgi, LOCATION '<worker>' [, url '<arcgis url>'] 
 
 | Option | Default | Meaning |
 |---|---|---|
-| `url` | none | What to expose as views (see below). Omit it to use only `arcgis_query()`. |
+| `url` | none | What to expose as views (see below). Omit it to use the query, summary and imagery functions directly. |
 | `precision` | `7` | Decimal places kept in returned coordinates (ArcGIS `geometryPrecision`), 0–15. 7 is about 1 cm in longitude/latitude; lower values make responses smaller. |
 | `token` | none | A pre-generated ArcGIS token for token-secured services. See [Authentication](#authentication). |
 | `username`, `password` | none | An ArcGIS user; the worker generates and renews tokens. |
@@ -53,6 +56,75 @@ What the `url` points at decides the layout:
 When a service has both a FeatureServer and a MapServer, the FeatureServer is used.
 Services are listed when you attach; each schema's views are fetched the first time you use
 them.
+
+### Server-side summaries and imagery
+
+Use any compatible layer URL with `arcgis_query` or the explicit summary functions.
+These examples use public U.S. services:
+
+```sql
+ATTACH 'arcgis' (TYPE vgi, LOCATION '/abs/path/to/vgi-arcgis/bin/vgi-arcgis-worker');
+
+-- Counts on the Census server, without downloading county features.
+SELECT feature_count
+FROM arcgis.main.arcgis_count(
+  'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1',
+  where_clause := 'STATE = ''36''');  -- 62 New York counties
+
+-- Groups and aggregates on the server, returning only the summaries.
+SELECT group_value AS state, statistic_value AS counties
+FROM arcgis.main.arcgis_statistics(
+  'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1',
+  'OBJECTID', statistic := 'count', group_by := 'STATE',
+  where_clause := 'STATE = ''36''')
+ORDER BY state;
+
+-- Filter a layer by a WGS84 box before counting it.
+SELECT feature_count
+FROM arcgis.main.arcgis_count(
+  'https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28',
+  bbox := '-77.05,38.85,-77.04,38.86');
+```
+
+`arcgis_count(url, where_clause := '1=1', bbox := '')` returns one `feature_count BIGINT`,
+including zero. `arcgis_statistics(url, statistic_field, statistic := 'sum', group_by := '',
+where_clause := '1=1', bbox := '')` supports `count`, `sum`, `min`, `max`, `avg`, `stddev`
+and `var`. `statistic_field` must be a numeric field, except that `count` accepts any
+attribute and counts its non-null values. `group_by` accepts one field. Results are
+`group_value VARCHAR` and `statistic_value DOUBLE`; ungrouped and null-valued groups have
+a null `group_value`. Aggregate nulls remain null, and empty grouped results have no rows.
+Large integer aggregates can lose precision in `DOUBLE`; use `arcgis_count` for exact
+total feature counts. Missing, malformed or truncated responses raise errors.
+
+These functions use **ArcGIS SQL and spatial semantics**, including the server's
+collation. Pass source filters through `where_clause` and `bbox`; an outer DuckDB
+`WHERE` filters the resulting summaries. These are explicit API operations, not
+automatic pushdown of DuckDB `COUNT(*)` or `GROUP BY`. A box is
+`xmin,ymin,xmax,ymax` in WGS84 and uses the server's intersects predicate. Boxes crossing
+the antimeridian are rejected. Narrow the source filters if grouped results exceed
+the service's transfer limit. Required NULL arguments are rejected; optional NULL
+arguments use their defaults. All remote functions use the existing scoped credentials.
+
+ImageServer services support pixel sampling through `arcgis_sample`:
+
+```sql
+SELECT point_index, TRY_CAST(value AS DOUBLE) AS elevation_m
+FROM arcgis.main.arcgis_sample(
+  'https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer',
+  '[[-77.0365,38.8977],[-77.04,38.90]]')
+ORDER BY point_index;
+```
+
+`points_json` is a JSON array of WGS84 `[longitude, latitude]` pairs. The function sends
+up to 100 points per request and accepts up to 10,000 points; an empty array returns
+no rows. It uses `getSamples` with the default mosaic/pixel size and the first non-NoData
+value. The raw `value` column preserves multiband and NoData text; `TRY_CAST` converts
+single-band values. USGS 3DEP elevations are in meters. Other columns are `sample_x`,
+`sample_y`, `spatial_reference` (JSON text), `raster_id` and `resolution` (source raster
+coordinate-system units). `point_index` is the zero-based input position if the server
+supplies `locationId`, otherwise NULL. Points outside coverage may produce no row.
+This supports pixel sampling, not raster-file downloads or image export. ImageServer
+URLs are passed directly to this function rather than attached as feature views.
 
 ### ArcGIS Hub and Open Data sites
 
@@ -250,8 +322,21 @@ quickly. Attribute-only scans use `maxRecordCount` pages throughout. Pages are f
 
 - by object ID, when the layer supports ordering;
 - by offset, when it only supports pagination;
-- in one request otherwise. If such a server truncates the result, the query fails with an
-  error rather than returning partial data.
+- in one request otherwise, falling back to `returnIdsOnly` and bounded `objectIds`
+  batches if the result is truncated. IDs are sorted and deduplicated. If the service
+  truncates a batch, the worker reduces it; unsupported or incomplete ID responses fail
+  rather than returning partial data.
+
+Offset paging advances the requested page window, including when spatial-index filtering
+returns a short or empty page with `exceededTransferLimit=true`. An empty keyset page with
+more results falls back to object IDs. Missing feature arrays and non-advancing keyset
+cursors are errors. MapServer object-ID fields can also be identified from field metadata.
+
+The ID fallback carries a small cursor across requests. Each process caches up to four
+scan-specific ID lists of at most one million IDs each, for up to five minutes. A different
+HTTP process or an evicted cache entry re-enumerates IDs after the cursor. No credentials
+or whole-layer ID arrays travel in the cursor. These remain live reads, not a transactional
+snapshot of a dataset being edited during a scan.
 
 Requests retry on HTTP 429 and 5xx (honouring `Retry-After`) and time out after 60 s. Layer
 metadata is cached for 5 minutes.
@@ -274,7 +359,8 @@ metadata is cached for 5 minutes.
   `information_schema` walk every schema of every attached database. On a site with
   thousands of services, that fetches the metadata of each one, from many different servers.
   Query views by name, or attach a single dataset or service instead.
-- **Imagery and other services** (ImageServer, GeocodeServer, GPServer) are skipped.
+- **ImageServer** supports explicit pixel sampling with `arcgis_sample`, but is not
+  exposed as feature views. GeocodeServer and GPServer services are skipped.
 - **DuckDB 2.0 axis order.** Geometry is longitude/latitude. Spheroid functions such as
   `ST_Area_Spheroid` need `SET geometry_always_xy = true` (the default from DuckDB 2.1).
 - A misspelled table name makes DuckDB look for similar names, which fetches the
@@ -328,21 +414,39 @@ Stock DuckDB 2.0.0 (VGI from the `query_farm` repository) and Haybarn 2.0.0rc11:
 
 ```bash
 make check     # lint, unit tests, SQL tests over stdio/launch/HTTP, metadata lint
+make test-live LIVE_CASES=test/live/us_public.json # optional U.S. example profile
 ```
 
 The SQL tests run against `test/mock_api/server.py`, an offline mock of the ArcGIS REST API.
 It covers paging modes, filters, multipolygons with holes, an Esri-JSON-only layer, a
 non-spatial table, a legacy server, and throttling (429 on first request). It also mocks the
 ArcGIS Hub and sharing APIs: domain lookup, both site catalog formats, paged search, dataset
-IDs and the site search used for slugs. Nothing in
-`make check` touches the network.
-`vgi-agent-tests.yaml` holds live tasks against Virginia's VGIN services.
+IDs and the site search used for slugs. The fixture queries in `make check` do not
+need live ArcGIS services. Dependency/extension
+installation and metadata validation may still use the network.
+`vgi-agent-tests.yaml` holds example tasks against public ArcGIS services.
+
+`make test-live LIVE_CASES=<path>` runs a caller-selected JSON file through stock DuckDB
+2.0.0 with the signed VGI extension from `query_farm`. There is no default country or
+provider. The optional `test/live/us_public.json` profile covers server counts/statistics,
+spatial feature queries and elevation sampling using public U.S. endpoints. To check
+other services, create a file with `schema_version: 1` and a nonempty `checks` array;
+each check contains a `name`, `sql` (using the `arcgis` catalog), and expected `rows`
+as an array of arrays. Project JSON-compatible values and order multirow results explicitly.
+
+The runner prints individual results and writes the tested SQL, engine/extension
+versions and results to `.tools/live.json`. A 180-second deadline covers the entire run;
+invoke `scripts/test_live.py --cases <path> --timeout <seconds>` to change it.
+Live checks are opt-in because service outages and changing data should not make the
+offline fixture suite flaky. `make check` uses Haybarn 2.0.0rc11 for its SQL tests.
 
 `src/` layout: `catalog.ts` (ATTACH and views), `discovery.ts` (walking directories and
 services), `hub.ts` (Hub site and dataset URLs), `query.ts` (`arcgis_query`), `where.ts`
 (attribute filter translation), `spatial.ts` (spatial filter translation), `wkb.ts`
 (GeoJSON → WKB, WKB boxes), `esri.ts`
-(metadata, types, Esri JSON → GeoJSON), `http.ts` (retries, caching), `options.ts`.
+(metadata, types, Esri JSON → GeoJSON), `http.ts` (retries, caching), `options.ts`,
+`paging.ts` (scan cursors and legacy ID batches),
+`summary.ts` (server aggregates) and `imagery.ts` (pixel sampling).
 
 ## Support
 

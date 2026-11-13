@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0
+
+All operations accept caller-supplied ArcGIS URLs. The worker has no built-in country
+or agency presets; geographic endpoints are examples and optional test profiles.
+
+- Explicit `arcgis_count` and `arcgis_statistics` operations perform counts and grouped
+  numeric summaries on the server, with ArcGIS SQL and WGS84 bounding-box filters.
+- `arcgis_sample` reads ImageServer pixel values at batches of WGS84 points, including
+  multiband and NoData values preserved as text.
+- Sparse spatial pages no longer terminate a scan early. Legacy truncated responses
+  fall back to object-ID batching, with adaptive batch sizes and portable cursors.
+  MapServer OID fields are inferred from field metadata when needed.
+- Regression SQL covers paging, summaries, imagery and scoped authentication over all
+  transports. `make test-live LIVE_CASES=<path>` runs caller-selected live-service
+  checks through stock DuckDB.
+
 ## 0.5.0
 
 - Speaks VGI protocol 3.3 (`@query-farm/vgi` 0.50.0) and requires the current VGI DuckDB

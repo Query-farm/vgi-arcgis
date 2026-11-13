@@ -16,8 +16,7 @@ fail_on = "warning"
 #   tooling-bug       the linter is wrong; report it upstream
 ignore = [
   # { code = "VGI146", kind = "domain-exemption", reason = "every entry point needs a key" },
-  { code = "VGI509", kind = "domain-exemption", reason = "every query reads a live remote ArcGIS server; no example can run offline or deterministically, and executable examples must not use the network" },
-  { code = "VGI910", kind = "domain-exemption", reason = "arcgis_query's columns are the attribute fields of whatever remote layer the url names, so no declared schema can match every layer; the fixed geometry_geojson column is declared and the rest is documented in vgi.result_dynamic_columns_md" },
+  { code = "VGI910", kind = "domain-exemption", reason = "arcgis_query's columns are the attribute fields of whatever remote layer the url names, so no declared schema can match every layer; the fixed geometry column is declared and the rest is documented in vgi.result_dynamic_columns_md" },
 ]
 
 # Every scan probe reads a live public ArcGIS server (Virginia's VGIN). Its first page

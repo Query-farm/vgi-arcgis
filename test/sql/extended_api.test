@@ -1,0 +1,128 @@
+# name: test/sql/extended_api.test
+# description: Legacy/sparse paging, server summaries and raster sampling
+# group: [arcgis]
+
+require vgi
+
+require-env ARCGIS_WORKER
+
+require-env ARCGIS_MOCK_API
+
+statement ok
+ATTACH 'arcgis' (TYPE vgi, LOCATION '{ARCGIS_WORKER}');
+
+# Empty and short spatial pages must not end the stream or repeat records.
+query IT
+SELECT OBJECTID, KIND FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/Sparse/MapServer/0') ORDER BY OBJECTID;
+----
+1	a
+2	b
+3	b
+
+# A legacy server's unordered returnIdsOnly response is read in bounded batches.
+query IT
+SELECT OBJECTID, KIND FROM arcgis.main.arcgis_query('{ARCGIS_MOCK_API}/arcgis/rest/services/LegacyIds/MapServer/0') ORDER BY OBJECTID;
+----
+1	a
+2	b
+3	b
+
+query I
+SELECT feature_count FROM arcgis.main.arcgis_count('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0', where_clause := 'FIPS = ''51001''');
+----
+2
+
+query I
+SELECT feature_count FROM arcgis.main.arcgis_count('{ARCGIS_MOCK_API}/arcgis/rest/services/LegacyIds/MapServer/0', bbox := '0.5,0.5,1.5,1.5');
+----
+1
+
+query I
+SELECT feature_count FROM arcgis.main.arcgis_count('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0', where_clause := 'FIPS = ''none''');
+----
+0
+
+query TR
+SELECT group_value, statistic_value FROM arcgis.main.arcgis_statistics('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0', 'ACRES', group_by := 'FIPS', where_clause := 'FIPS IN (''51001'', ''51003'')') ORDER BY group_value;
+----
+51001	3.75
+51003	10.0
+
+query TR
+SELECT group_value, statistic_value FROM arcgis.main.arcgis_statistics('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0', 'ACRES', where_clause := 'FIPS = ''none''');
+----
+NULL	NULL
+
+query R
+SELECT statistic_value FROM arcgis.main.arcgis_statistics('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0', 'ACRES', statistic := 'count');
+----
+4.0
+
+# Three groups exceed this mock server's limit of two: partial aggregates must fail.
+statement error
+SELECT * FROM arcgis.main.arcgis_statistics('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0', 'ACRES', group_by := 'FIPS');
+----
+<REGEX>:.*truncated statistics.*
+
+statement error
+SELECT * FROM arcgis.main.arcgis_statistics('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Parcels/FeatureServer/0', 'NO_SUCH_FIELD');
+----
+<REGEX>:.*statistic_field.*
+
+statement error
+SELECT * FROM arcgis.main.arcgis_count('{ARCGIS_MOCK_API}/arcgis/rest/services/LegacyIds/MapServer/0', bbox := '170,0,-170,1');
+----
+<REGEX>:.*bbox.*
+
+query ITR
+SELECT point_index, value, resolution FROM arcgis.main.arcgis_sample('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Imagery/ImageServer', '[[1,2],[2,3],[3,90]]') ORDER BY point_index;
+----
+0	12	1.0
+1	1, 2, 3	1.0
+2	NoData	1.0
+
+# First request has no covered pixels; second request must still be read.
+query IT
+SELECT point_index, value FROM arcgis.main.arcgis_sample('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Imagery/ImageServer', '[' || repeat('[0,1],', 100) || '[1,2]]') ORDER BY point_index;
+----
+100	12
+
+query I
+SELECT count(*) FROM arcgis.main.arcgis_sample('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Imagery/ImageServer', '[]');
+----
+0
+
+statement error
+SELECT * FROM arcgis.main.arcgis_sample('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Imagery/ImageServer', '[[181,0]]');
+----
+<REGEX>:.*points_json.*
+
+# New API functions use the same scoped secret lookup as feature reads.
+statement ok
+CREATE SECRET api_mock (TYPE arcgis, TOKEN 'fake-static-token', SCOPE '{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/');
+
+query I
+SELECT feature_count FROM arcgis.main.arcgis_count('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0');
+----
+3
+
+query R
+SELECT statistic_value FROM arcgis.main.arcgis_statistics('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/FeatureServer/0', 'OBJECTID');
+----
+6.0
+
+query T
+SELECT value FROM arcgis.main.arcgis_sample('{ARCGIS_MOCK_API}/arcgis/rest/services/Secured/Imagery/ImageServer', '[[1,2]]');
+----
+12
+
+# Optional NULL arguments follow the SDK defaults; required NULLs fail.
+query I
+SELECT feature_count FROM arcgis.main.arcgis_count('{ARCGIS_MOCK_API}/arcgis/rest/services/LegacyIds/MapServer/0', where_clause := NULL, bbox := NULL);
+----
+3
+
+statement error
+SELECT * FROM arcgis.main.arcgis_sample('{ARCGIS_MOCK_API}/arcgis/rest/services/Demo/Imagery/ImageServer', NULL);
+----
+<REGEX>:.*points_json.*

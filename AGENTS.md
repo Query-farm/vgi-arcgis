@@ -11,6 +11,10 @@ batches. Background reading, in order of usefulness:
 
 ## Definition of done
 
+Project scope: keep the worker useful worldwide. Accept user-supplied ArcGIS URLs;
+do not build country or agency preset lists into the runtime. Geographic endpoints
+belong in examples or explicitly selected integration-test profiles.
+
 **`make check` passes.** It runs formatting and static checks, unit tests, the SQL
 tests over the stdio, launch and http transports, and the metadata quality check
 (vgi-lint, at the `fail_on` level in `vgi-lint.toml`). Don't hand work back until it passes. If a

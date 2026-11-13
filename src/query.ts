@@ -13,38 +13,27 @@
  *   envelope-intersects query (see spatial.ts).
  * - Paging is keyset on the object id when the layer supports `orderBy`,
  *   `resultOffset` when it only supports pagination, and a single request
- *   otherwise (failing loudly if the server truncates it).
+ *   otherwise (using object-ID batches if the server truncates it).
  */
 
 import { batchFromColumns, binary, defineTableFunction, field, schema, utf8 } from "@query-farm/vgi";
 import { resolveAuth, secretLookup } from "./auth.ts";
 import { arrowType, attributeFields, esriToGeoJson, GEOMETRY, type LayerMeta, supportsGeoJson } from "./esri.ts";
-import { ArcgisError, getJson, getMetadata, isAuthError, type RequestAuth } from "./http.ts";
+import { ArcgisError, getMetadata, isAuthError, type RequestAuth } from "./http.ts";
 import { resolveUrl } from "./hub.ts";
 import { log } from "./log.ts";
 import { column, objectTags } from "./meta.ts";
 import { decodeSettings } from "./options.ts";
+import { type Feature, objectIdField, pagingMode, readPage, type ScanState } from "./paging.ts";
 import { padBox, spatialFilterBox, spatialQueryParams } from "./spatial.ts";
 import { WhereBuilder } from "./where.ts";
 import { geojsonToWkb } from "./wkb.ts";
 
+export { pagingMode } from "./paging.ts";
+
 interface QueryArgs {
   url: string;
 }
-
-/** Cursor. Plain numbers only: over HTTP it travels with each request. */
-interface QueryState {
-  /** Highest object id emitted (keyset paging); meaningful once `started`. */
-  lastOid: number;
-  started: boolean;
-  /** Rows emitted so far (offset paging). */
-  offset: number;
-  /** Pages fetched so far; sizes the next one (see pageSize). */
-  pages: number;
-  done: boolean;
-}
-
-type PagingMode = "keyset" | "offset" | "single";
 
 /**
  * Fetch and check a layer's metadata; an ArcGIS Hub dataset URL is resolved
@@ -82,13 +71,6 @@ export function pageSize(meta: LayerMeta, pages: number, withGeometry: boolean):
   return withGeometry ? Math.min(max, FIRST_PAGE * 4 ** Math.min(pages, 10)) : max;
 }
 
-export function pagingMode(meta: LayerMeta): PagingMode {
-  if (!meta.objectIdField) return meta.advancedQueryCapabilities?.supportsPagination ? "offset" : "single";
-  if (meta.advancedQueryCapabilities?.supportsOrderBy) return "keyset";
-  if (meta.advancedQueryCapabilities?.supportsPagination) return "offset";
-  return "single";
-}
-
 /** Coerce one attribute value to what its Arrow column expects. */
 function coerce(esriType: string, v: unknown): unknown {
   if (v === null || v === undefined) return null;
@@ -112,15 +94,7 @@ function coerce(esriType: string, v: unknown): unknown {
   }
 }
 
-/** A feature from `/query`: GeoJSON (`properties`) or Esri JSON (`attributes`). */
-interface ArcgisFeature {
-  id?: number | string;
-  properties?: Record<string, unknown>;
-  attributes?: Record<string, unknown>;
-  geometry?: unknown;
-}
-
-export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
+export const arcgisQuery = defineTableFunction<QueryArgs, ScanState>({
   name: "arcgis_query",
   description: "Read the features of one ArcGIS FeatureServer/MapServer layer or table, with filter pushdown",
   args: { url: utf8() },
@@ -181,7 +155,7 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
     return { outputSchema: schema(columns), ...lookup };
   },
 
-  initialState: () => ({ lastOid: 0, started: false, offset: 0, pages: 0, done: false }),
+  initialState: () => ({ lastOid: 0, started: false, offset: 0, pages: 0, done: false, idScan: "" }),
 
   process: async (params, state, out) => {
     if (state.done) {
@@ -201,18 +175,14 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
     const wanted = params.outputSchema.fields.map((f) => f.name);
     const attrs = wanted.filter((n) => n !== GEOMETRY);
     const wantGeometry = wanted.includes(GEOMETRY);
-    const oid = meta.objectIdField;
+    const oid = objectIdField(meta);
     const mode = pagingMode(meta);
     const outFields = new Set(attrs);
     if (oid) outFields.add(oid);
     const geojson = supportsGeoJson(meta);
 
     const q = new URLSearchParams({
-      where: !(mode === "keyset" && state.started)
-        ? where
-        : where === "1=1"
-          ? `${oid} > ${state.lastOid}`
-          : `(${where}) AND ${oid} > ${state.lastOid}`,
+      where,
       outFields: outFields.size ? [...outFields].join(",") : "*",
       returnGeometry: String(wantGeometry && Boolean(meta.geometryType)),
       outSR: "4326",
@@ -220,9 +190,7 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
     });
     if (wantGeometry) q.set("geometryPrecision", String(settings.precision));
     if (sendBox) for (const [k, v] of Object.entries(spatialQueryParams(sendBox))) q.set(k, v);
-    if (mode === "keyset") q.set("orderByFields", `${oid} ASC`);
     const size = pageSize(meta, state.pages, wantGeometry && Boolean(meta.geometryType));
-    if (mode === "offset") q.set("resultOffset", String(state.offset));
     if (size !== undefined && mode !== "single") q.set("resultRecordCount", String(size));
     if (state.offset === 0)
       log.debug(
@@ -230,21 +198,13 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
           (sendBox ? ` box=${[sendBox.xmin, sendBox.ymin, sendBox.xmax, sendBox.ymax].join(",")}` : ""),
       );
 
-    const body = (await getJson(`${url}/query?${q}`, auth)) as {
-      features?: ArcgisFeature[];
-      exceededTransferLimit?: boolean;
-      properties?: { exceededTransferLimit?: boolean };
-    };
-    const features = body.features ?? [];
-    const exceeded = Boolean(body.exceededTransferLimit ?? body.properties?.exceededTransferLimit);
-    // Every process() call must emit a batch or finish; returning with neither
-    // stalls the stream (a query matching no rows would hang).
-    if (features.length === 0) {
-      state.done = true;
+    const features = await readPage(url, q, meta, state, auth);
+    state.pages += 1;
+    if (features.length === 0 && state.done) {
       out.finish();
       return;
     }
-    const attributesOf = (f: ArcgisFeature): Record<string, unknown> => (geojson ? f.properties : f.attributes) ?? {};
+    const attributesOf = (f: Feature): Record<string, unknown> => (geojson ? f.properties : f.attributes) ?? {};
 
     const columns: Record<string, unknown[]> = {};
     for (const name of attrs) {
@@ -258,24 +218,6 @@ export const arcgisQuery = defineTableFunction<QueryArgs, QueryState>({
       });
     }
     out.emit(batchFromColumns(columns, params.outputSchema));
-
-    state.offset += features.length;
-    state.pages += 1;
-    if (mode === "keyset" && oid) {
-      for (const f of features) {
-        const v = Number(attributesOf(f)[oid] ?? f.id);
-        if (!state.started || v > state.lastOid) state.lastOid = v;
-        state.started = true;
-      }
-    }
-    if (!exceeded) {
-      state.done = true;
-    } else if (mode === "single") {
-      throw new ArcgisError(
-        `${url} returned only ${features.length} rows: the server truncated the result and supports neither ` +
-          "orderBy nor pagination. Add a filter so fewer rows match.",
-      );
-    }
   },
 
   tags: {
