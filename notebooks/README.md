@@ -35,3 +35,12 @@ The visible SQL uses the literal `github-auto://Query-farm/vgi-arcgis@v0.6.0`, w
 The [Census county layer](https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1) is queried for state FIPS25 only. Source requests are read-only and materialized once; later analyses reuse that snapshot. Metadata, count and attributes are separate requests, not an atomic service snapshot. [Census area definitions](https://www2.census.gov/geo/pdfs/reference/GARM/Ch15GARM.pdf) explain the land/water distinction. Values are source area attributes in square metres, converted to km²; no geometry-area approximation is used. There is no replay mode or fabricated fallback. A failed source request stops execution.
 
 The threshold is an exploratory rule, not a Census label or a hazard model. The notebook does not infer population, usable land or flood risk.
+
+## SQL credential isolation
+
+The notebook creates Haybarn with a fresh temporary `secret_directory` and
+`allow_persistent_secrets=False` before attaching workers. It fully drains and
+checks an empty secret inventory. This example needs no saved SQL credential;
+its explicit public-data or local-fixture configuration remains in effect.
+Cleanup removes the temporary directory after closing the connection.
+Existing user SQL secrets are neither read, modified nor deleted.
