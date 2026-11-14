@@ -28,8 +28,9 @@ export const PARCEL_DENSITY_EXAMPLE = {
 /** arcgis_query (state names) joined to arcgis_statistics (county counts grouped by state on the server). */
 export const STATE_COUNTY_COUNTS_EXAMPLE = {
   description:
-    "The five states with the most counties, by name: arcgis_statistics counts counties per state FIPS on the " +
-    "Census server, and arcgis_query on the states layer turns each code into its abbreviation and name",
+    "The five states with the most counties and county equivalents (Virginia's count includes its independent " +
+    "cities), by name: arcgis_statistics counts them per state FIPS on the Census server, and arcgis_query on the " +
+    "states layer turns each code into its abbreviation and name",
   sql:
     "SELECT s.STUSAB, s.NAME, c.statistic_value::INTEGER AS counties " +
     `FROM arcgis.main.arcgis_query('${TIGER_STATES}') s ` +
