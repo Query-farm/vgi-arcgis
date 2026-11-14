@@ -105,6 +105,22 @@ the antimeridian are rejected. Narrow the source filters if grouped results exce
 the service's transfer limit. Required NULL arguments are rejected; optional NULL
 arguments use their defaults. All remote functions use the existing scoped credentials.
 
+The summaries join like any other table. Parcels per square mile in four Virginia cities,
+counting parcels on the server and taking each city's area from the boundaries layer:
+
+```sql
+SELECT b.NAMELSAD, p.statistic_value::BIGINT AS parcels,
+       round(p.statistic_value / b.AREASQMI) AS parcels_per_sq_mi
+FROM arcgis.main.arcgis_statistics(
+  'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0',
+  'OBJECTID', statistic := 'count', group_by := 'FIPS',
+  where_clause := 'FIPS IN (''51530'', ''51580'', ''51678'', ''51720'')') p
+JOIN arcgis.main.arcgis_query(
+  'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1') b
+  ON b.STCOFIPS = p.group_value
+ORDER BY parcels_per_sq_mi DESC;  -- Lexington City first, about 1,265
+```
+
 ImageServer services support pixel sampling through `arcgis_sample`:
 
 ```sql

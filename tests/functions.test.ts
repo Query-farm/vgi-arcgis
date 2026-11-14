@@ -370,3 +370,27 @@ describe("against the worker and the mock ArcGIS server", () => {
     await expect(getJson(`${services.replace("/arcgis/rest/services", "")}/missing`)).rejects.toThrow(/HTTP 404/);
   });
 });
+
+// ------------------------------------------------------------------ composed examples
+
+describe("composed examples", async () => {
+  const { CATALOG, FUNCTIONS } = await import("../src/catalog.ts");
+  const composed = await import("../src/examples.ts");
+  const schemaExamples = JSON.parse(CATALOG.schemas[0]?.tags?.["vgi.example_queries"] ?? "[]") as { sql: string }[];
+
+  for (const [name, ex] of Object.entries(composed)) {
+    test(`${name} is listed once in the schema and early on one function`, () => {
+      expect(schemaExamples.filter((e) => e.sql === ex.sql)).toHaveLength(1);
+      const owners = FUNCTIONS.filter((fn) =>
+        (JSON.parse(fn.meta.tags?.["vgi.example_queries"] ?? "[]") as { sql: string }[])
+          .slice(0, 5)
+          .some((e) => e.sql === ex.sql),
+      );
+      expect(owners).toHaveLength(1);
+      // Composed: it calls at least two of the worker's functions.
+      expect(FUNCTIONS.filter((fn) => ex.sql.includes(`arcgis.main.${fn.meta.name}(`)).length).toBeGreaterThanOrEqual(
+        2,
+      );
+    });
+  }
+});

@@ -1,13 +1,15 @@
 # Private graders for the public vgi.agent_test_tasks in the worker's catalog metadata.
 # `vgi-lint lint --ai` runs an agent on each prompt and grades it with check_sql.
 # See https://github.com/Query-farm/vgi-lint-check (VGI920).
-# These example tasks read live ArcGIS services; graders use ranges where results change.
+# These example tasks read live ArcGIS services. A check_sql runs in the agent's session
+# after it answers, so tasks graded that way ask the agent to save its answer in a temp
+# table, and the grader compares it with the same value recomputed live.
 tasks:
   - name: covington_parcels
     check_sql: >-
-      SELECT count(*) BETWEEN 5000 AND 7000
-      FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0')
-      WHERE FIPS = '51580'
+      SELECT (SELECT count(*) FROM covington_parcels) = 1
+      AND (SELECT max(parcels) FROM covington_parcels) = (
+        SELECT feature_count FROM arcgis.main.arcgis_count('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0', where_clause := 'FIPS = ''51580'''))
   - name: largest_of_two_cities
     reference_sql: >-
       SELECT NAME FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1')
@@ -19,6 +21,19 @@ tasks:
     reference_sql: >-
       SELECT group_value, statistic_value FROM arcgis.main.arcgis_statistics('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', 'OBJECTID', statistic := 'count', group_by := 'STATE', where_clause := 'STATE = ''36''') ORDER BY group_value
   - name: imagery_sampling
+    # Within half a metre of a live sample.
     check_sql: >-
-      SELECT count(*) = 1 AND bool_and(TRY_CAST(value AS DOUBLE) BETWEEN 0 AND 100)
-      FROM arcgis.main.arcgis_sample('https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer', '[[-77.0365,38.8977]]')
+      SELECT (SELECT count(*) FROM white_house_elevation) = 1
+      AND abs((SELECT max(elevation_m) FROM white_house_elevation) - (
+        SELECT TRY_CAST(value AS DOUBLE) FROM arcgis.main.arcgis_sample('https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer', '[[-77.0365,38.8977]]'))) < 0.5
+  - name: densest_virginia_city
+    # Composes arcgis_statistics (parcel counts per FIPS) with arcgis_query (city areas).
+    # Alexandria led the runner-up (Falls Church) by about 70% in 2026-11.
+    check_sql: >-
+      SELECT (SELECT count(*) FROM densest_city) = 1
+      AND (SELECT max(name) FROM densest_city) = (
+        SELECT b.NAME
+        FROM arcgis.main.arcgis_statistics('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0', 'OBJECTID', statistic := 'count', group_by := 'FIPS') p
+        JOIN arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1') b ON b.STCOFIPS = p.group_value
+        WHERE b.JURISTYPE = 'CI'
+        ORDER BY p.statistic_value / b.AREASQMI DESC LIMIT 1)

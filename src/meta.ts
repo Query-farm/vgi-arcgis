@@ -156,14 +156,28 @@ export const AGENT_TEST_TASKS = [
   {
     name: "imagery_sampling",
     prompt:
-      "Sample elevation in meters at longitude -77.0365, latitude 38.8977 from https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer using the imagery function.",
+      "Sample elevation in meters at longitude -77.0365, latitude 38.8977 from " +
+      "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer using the imagery function. " +
+      "Save the answer as a temporary table white_house_elevation with one DOUBLE column elevation_m.",
   },
   {
     name: "covington_parcels",
     prompt:
       "Using the arcgis worker, how many parcels does the Virginia statewide parcel layer " +
       "(https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0) " +
-      "have in Covington City (FIPS 51580)?",
+      "have in Covington City (FIPS 51580)? Save the answer as a temporary table covington_parcels " +
+      "with one BIGINT column parcels.",
+  },
+  {
+    name: "densest_virginia_city",
+    prompt:
+      "Which Virginia independent city has the most land parcels per square mile? Count parcels per FIPS code " +
+      "on the server from the statewide parcel layer " +
+      "(https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0, field FIPS) " +
+      "and divide by each city's AREASQMI from the cities and counties layer " +
+      "(https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1, " +
+      "where cities have JURISTYPE 'CI' and STCOFIPS is the FIPS code). Save the answer as a temporary table " +
+      "densest_city with one row and one VARCHAR column name holding the city's NAME.",
   },
   {
     name: "largest_of_two_cities",

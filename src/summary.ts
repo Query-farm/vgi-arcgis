@@ -1,6 +1,7 @@
 /** Explicit ArcGIS summaries: remote SQL semantics, without a feature download. */
 import { batchFromColumns, defineTableFunction, float64, int64, schema, utf8 } from "@query-farm/vgi";
 import { resolveAuth, secretLookup } from "./auth.ts";
+import { PARCEL_DENSITY_EXAMPLE } from "./examples.ts";
 import { ArcgisError, getJson } from "./http.ts";
 import { column, objectTags, resultColumns } from "./meta.ts";
 import { layerMeta } from "./query.ts";
@@ -229,5 +230,6 @@ export const arcgisStatistics = defineTableFunction<StatisticsArgs, { done: bool
       sql: "SELECT group_value AS state, statistic_value AS land_area FROM arcgis.main.arcgis_statistics('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', 'AREALAND', group_by := 'STATE', where_clause := 'STATE = ''36''') ORDER BY state",
       description: "Sum county land area by state on the Census server",
     },
+    PARCEL_DENSITY_EXAMPLE,
   ],
 });

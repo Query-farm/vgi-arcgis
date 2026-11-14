@@ -19,6 +19,7 @@
 import { batchFromColumns, binary, defineTableFunction, field, schema, utf8 } from "@query-farm/vgi";
 import { resolveAuth, secretLookup } from "./auth.ts";
 import { arrowType, attributeFields, esriToGeoJson, GEOMETRY, type LayerMeta, supportsGeoJson } from "./esri.ts";
+import { STATE_COUNTY_COUNTS_EXAMPLE } from "./examples.ts";
 import { ArcgisError, getMetadata, isAuthError, type RequestAuth } from "./http.ts";
 import { resolveUrl } from "./hub.ts";
 import { log } from "./log.ts";
@@ -293,5 +294,6 @@ export const arcgisQuery = defineTableFunction<QueryArgs, ScanState>({
         "Parcels touching a small box in downtown Covington; the server returns only features near the box, " +
         "not the state's millions of parcels",
     },
+    STATE_COUNTY_COUNTS_EXAMPLE,
   ],
 });

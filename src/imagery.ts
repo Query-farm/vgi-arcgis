@@ -2,6 +2,7 @@
 import { batchFromColumns, defineTableFunction, float64, int32, int64, schema, utf8 } from "@query-farm/vgi";
 import { resolveAuth, secretLookup } from "./auth.ts";
 import { normalizeUrl } from "./esri.ts";
+import { ELEVATION_BY_CITY_EXAMPLE } from "./examples.ts";
 import { ArcgisError, getJson } from "./http.ts";
 import { column, objectTags, resultColumns } from "./meta.ts";
 
@@ -170,5 +171,6 @@ export const arcgisSample = defineTableFunction<{ url: string; points_json: stri
       sql: "SELECT point_index, TRY_CAST(value AS DOUBLE) AS elevation_m FROM arcgis.main.arcgis_sample('https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer', '[[-77.0365,38.8977],[-77.04,38.90]]') ORDER BY point_index",
       description: "Sample USGS bare-earth elevation in meters near the White House",
     },
+    ELEVATION_BY_CITY_EXAMPLE,
   ],
 });
