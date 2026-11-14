@@ -455,3 +455,7 @@ Open an issue on this repository. For VGI itself, see [query.farm](https://query
 ## License
 
 [MIT](LICENSE) © Query Farm LLC
+
+## Executed notebooks
+
+[Explore county land and water shares with SQL](notebooks/README.md) in a portable, executed notebook with a separate cutoff experiment.
