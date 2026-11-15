@@ -1,0 +1,51 @@
+{
+  "query": "SELECT * FROM arcgis.main.arcgis_sample('https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer','[[-71.06,42.36],[-72.59,42.10],[-73.25,42.45],[-73.166,42.637],[0,0]]') ORDER BY point_index",
+  "captured_at": "2026-11-14T23:55:05.469665+00:00",
+  "columns": [
+    "point_index",
+    "sample_x",
+    "sample_y",
+    "spatial_reference",
+    "value",
+    "raster_id",
+    "resolution"
+  ],
+  "rows": [
+    [
+      0,
+      -71.06,
+      42.36,
+      "{\"wkid\":4326,\"latestWkid\":4326}",
+      "11.599477768",
+      31946,
+      1.0
+    ],
+    [
+      1,
+      -72.59,
+      42.1,
+      "{\"wkid\":4326,\"latestWkid\":4326}",
+      "20.619819641",
+      26367,
+      1.0
+    ],
+    [
+      2,
+      -73.25,
+      42.45,
+      "{\"wkid\":4326,\"latestWkid\":4326}",
+      "312.581542969",
+      138911,
+      1.0
+    ],
+    [
+      3,
+      -73.166,
+      42.637,
+      "{\"wkid\":4326,\"latestWkid\":4326}",
+      "1063.355346680",
+      95345,
+      1.0
+    ]
+  ]
+}

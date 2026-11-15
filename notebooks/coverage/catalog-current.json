@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "repository": "Query-farm/vgi-arcgis",
+  "revision": "ea7c0f05ae8a75de3d8d235f44d683f5364bcd8c",
+  "captured_at": "2026-11-14T23:54:58.049556+00:00",
+  "default_schema": "main",
+  "scope": "all_public_functions_and_tables",
+  "complete": true,
+  "evidence": [
+    {
+      "path": "coverage/arcgis_count-columns.json",
+      "sha256": "1a2491796c49bb621c612ae470ff1c43f69555483af20380550805e5a2c61b4b",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/arcgis_query-columns.json",
+      "sha256": "dfc63f6ad7aa03745498fd81f0ca0571c69e88a3aff43e5b968aaf7e7b300c6d",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/arcgis_sample-columns.json",
+      "sha256": "63ce8072e1e472c4a4cb3de3bb188d220c7f6a19659968c3b5e4b33df21ee470",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/arcgis_statistics-columns.json",
+      "sha256": "282a194ca1013bad4930ad75aa94263d05f6fd5f31ce900a260de288be164765",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/arguments.json",
+      "sha256": "610a11e9cc0a91497c00fc6c87d07013c2bed7a4b1ecd4d9b0d5a5ce325d099b",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/catalog-metadata.json",
+      "sha256": "da8fc3c27040157d9c1a8bf925067bfd076a2c66c14162df2934aa015b91a19a",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/copy-formats.json",
+      "sha256": "f0a3441e480c7debee4a3a65387e8262b2dd08d13372311fd1f91637cbd0fe79",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/functions.json",
+      "sha256": "1c1344df8a65ffacea7ffa2060f0086be9aa1d89b5f3c1cc9b3e34af22d4332f",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/image-metadata.json",
+      "sha256": "1b3563d720186c6d33c61a60f18fc95a25e0996aaec72b642b634baa19d4d8bd",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/layer-metadata.json",
+      "sha256": "ae928c3a84d8d30889142bd7094e97d530cb07f30fbc38c698d0096ddcf9a097",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/sample-probe.json",
+      "sha256": "648b5a99d30862c84288e4fad270213e0413540f894f889388b4c3773baa437e",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/source-compatibility.json",
+      "sha256": "4e47aec7fa93902e69461adb38ba55ed556e187356fcad3dbf85519868a2087b",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/tables.json",
+      "sha256": "1694ba4e5ac99c86b534bdfec53fce32a7dcd8acc0b5ba48dbcf631fac4dfa32",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    },
+    {
+      "path": "coverage/views.json",
+      "sha256": "101767b7837ae4ec78e88942b29a0704f8f535689b201a560be588f0ace71986",
+      "description": "Complete actual native release catalog/full arguments/output columns and public source metadata; source-reviewed current interface compatibility explicitly distinguished from runtime."
+    }
+  ],
+  "objects": [
+    {
+      "schema": "main",
+      "name": "arcgis_count",
+      "kind": "function",
+      "authentication": "optional",
+      "access": "read",
+      "signatures": [
+        "arcgis_count(url VARCHAR, where_clause VARCHAR, bbox VARCHAR) -> TABLE(feature_count BIGINT)"
+      ],
+      "output_schema_scope": "arcgis_query columns depend on requested layer; representative county layer DESCRIBE retained. Other outputs fixed."
+    },
+    {
+      "schema": "main",
+      "name": "arcgis_query",
+      "kind": "function",
+      "authentication": "optional",
+      "access": "read",
+      "signatures": [
+        "arcgis_query(url VARCHAR) -> TABLE(MTFCC VARCHAR, OID VARCHAR, GEOID VARCHAR, STATE VARCHAR, COUNTY VARCHAR, COUNTYNS VARCHAR, BASENAME VARCHAR, NAME VARCHAR, LSADC VARCHAR, FUNCSTAT VARCHAR, COUNTYCC VARCHAR, AREALAND BIGINT, AREAWATER BIGINT, OBJECTID INTEGER, CENTLAT VARCHAR, CENTLON VARCHAR, INTPTLAT VARCHAR, INTPTLON VARCHAR, geometry GEOMETRY)"
+      ],
+      "output_schema_scope": "arcgis_query columns depend on requested layer; representative county layer DESCRIBE retained. Other outputs fixed."
+    },
+    {
+      "schema": "main",
+      "name": "arcgis_sample",
+      "kind": "function",
+      "authentication": "optional",
+      "access": "read",
+      "signatures": [
+        "arcgis_sample(url VARCHAR, points_json VARCHAR) -> TABLE(point_index INTEGER, sample_x DOUBLE, sample_y DOUBLE, spatial_reference VARCHAR, value VARCHAR, raster_id BIGINT, resolution DOUBLE)"
+      ],
+      "output_schema_scope": "arcgis_query columns depend on requested layer; representative county layer DESCRIBE retained. Other outputs fixed."
+    },
+    {
+      "schema": "main",
+      "name": "arcgis_statistics",
+      "kind": "function",
+      "authentication": "optional",
+      "access": "read",
+      "signatures": [
+        "arcgis_statistics(url VARCHAR, statistic_field VARCHAR, where_clause VARCHAR, group_by VARCHAR, statistic VARCHAR, bbox VARCHAR) -> TABLE(group_value VARCHAR, statistic_value DOUBLE)"
+      ],
+      "output_schema_scope": "arcgis_query columns depend on requested layer; representative county layer DESCRIBE retained. Other outputs fixed."
+    }
+  ],
+  "launch": "github-auto://Query-farm/vgi-arcgis@v0.6.0",
+  "runtime": "Haybarn2.0.0rc11",
+  "configuration": {
+    "attach_url": null,
+    "scope_limitation": "Complete fixed unconfigured catalog. Configuring a service URL creates data-dependent views; these notebooks deliberately do not enumerate unrelated services."
+  },
+  "review_notes": "Unconfigured ATTACH: all four fixed public functions, no tables/views/COPY formats. Arbitrary user-supplied discovery URLs can expose data-dependent schemas/views; no discovery URL is configured in these notebooks and no invented global denominator is claimed. Functions support optional scoped credentials, included in denominator; notebooks use public URLs and empty SQL-secret inventory. Current source adds only composed SQL examples and agent task prompts. Function registration, arguments, output schemas, fetching/paging/summary/sampling/auth implementation and root dependencies are unchanged. Complete actual release catalog plus reviewed source diff establish the matching current interface; current source is not separately built or run."
+}

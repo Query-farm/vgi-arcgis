@@ -1,0 +1,332 @@
+{
+  "schema_version": 1,
+  "status": "met",
+  "meets_target": true,
+  "catalogs": {
+    "released": {
+      "catalog_status": "verified",
+      "revision": "v0.6.0",
+      "catalog_sha256": "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819",
+      "collection_reconciled": true,
+      "denominator": 4,
+      "observed_objects": 4,
+      "required": 4,
+      "verified_count": 4,
+      "candidate_count": 0,
+      "fraction": 1.0,
+      "meets_target": true,
+      "exact_runtime_count": 4,
+      "runtime_revisions": [
+        "v0.6.0"
+      ],
+      "covered": [
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_count"
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_query"
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_sample"
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_statistics"
+        }
+      ],
+      "uncovered": [],
+      "objects": [
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_count",
+          "kinds": [
+            "function"
+          ],
+          "signatures": [
+            "arcgis_count(url VARCHAR, where_clause VARCHAR, bbox VARCHAR) -> TABLE(feature_count BIGINT)"
+          ],
+          "access": [
+            "read"
+          ],
+          "authentication": [
+            "optional"
+          ]
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_query",
+          "kinds": [
+            "function"
+          ],
+          "signatures": [
+            "arcgis_query(url VARCHAR) -> TABLE(MTFCC VARCHAR, OID VARCHAR, GEOID VARCHAR, STATE VARCHAR, COUNTY VARCHAR, COUNTYNS VARCHAR, BASENAME VARCHAR, NAME VARCHAR, LSADC VARCHAR, FUNCSTAT VARCHAR, COUNTYCC VARCHAR, AREALAND BIGINT, AREAWATER BIGINT, OBJECTID INTEGER, CENTLAT VARCHAR, CENTLON VARCHAR, INTPTLAT VARCHAR, INTPTLON VARCHAR, geometry GEOMETRY)"
+          ],
+          "access": [
+            "read"
+          ],
+          "authentication": [
+            "optional"
+          ]
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_sample",
+          "kinds": [
+            "function"
+          ],
+          "signatures": [
+            "arcgis_sample(url VARCHAR, points_json VARCHAR) -> TABLE(point_index INTEGER, sample_x DOUBLE, sample_y DOUBLE, spatial_reference VARCHAR, value VARCHAR, raster_id BIGINT, resolution DOUBLE)"
+          ],
+          "access": [
+            "read"
+          ],
+          "authentication": [
+            "optional"
+          ]
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_statistics",
+          "kinds": [
+            "function"
+          ],
+          "signatures": [
+            "arcgis_statistics(url VARCHAR, statistic_field VARCHAR, where_clause VARCHAR, group_by VARCHAR, statistic VARCHAR, bbox VARCHAR) -> TABLE(group_value VARCHAR, statistic_value DOUBLE)"
+          ],
+          "access": [
+            "read"
+          ],
+          "authentication": [
+            "optional"
+          ]
+        }
+      ],
+      "issues": []
+    },
+    "current": {
+      "catalog_status": "verified",
+      "revision": "ea7c0f05ae8a75de3d8d235f44d683f5364bcd8c",
+      "catalog_sha256": "03cfb4884528934995ea0d715b108130c4d4f1cf08f2caaeec1578876ac3b80e",
+      "collection_reconciled": true,
+      "denominator": 4,
+      "observed_objects": 4,
+      "required": 4,
+      "verified_count": 4,
+      "candidate_count": 0,
+      "fraction": 1.0,
+      "meets_target": true,
+      "exact_runtime_count": 0,
+      "runtime_revisions": [
+        "v0.6.0"
+      ],
+      "covered": [
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_count"
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_query"
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_sample"
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_statistics"
+        }
+      ],
+      "uncovered": [],
+      "objects": [
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_count",
+          "kinds": [
+            "function"
+          ],
+          "signatures": [
+            "arcgis_count(url VARCHAR, where_clause VARCHAR, bbox VARCHAR) -> TABLE(feature_count BIGINT)"
+          ],
+          "access": [
+            "read"
+          ],
+          "authentication": [
+            "optional"
+          ]
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_query",
+          "kinds": [
+            "function"
+          ],
+          "signatures": [
+            "arcgis_query(url VARCHAR) -> TABLE(MTFCC VARCHAR, OID VARCHAR, GEOID VARCHAR, STATE VARCHAR, COUNTY VARCHAR, COUNTYNS VARCHAR, BASENAME VARCHAR, NAME VARCHAR, LSADC VARCHAR, FUNCSTAT VARCHAR, COUNTYCC VARCHAR, AREALAND BIGINT, AREAWATER BIGINT, OBJECTID INTEGER, CENTLAT VARCHAR, CENTLON VARCHAR, INTPTLAT VARCHAR, INTPTLON VARCHAR, geometry GEOMETRY)"
+          ],
+          "access": [
+            "read"
+          ],
+          "authentication": [
+            "optional"
+          ]
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_sample",
+          "kinds": [
+            "function"
+          ],
+          "signatures": [
+            "arcgis_sample(url VARCHAR, points_json VARCHAR) -> TABLE(point_index INTEGER, sample_x DOUBLE, sample_y DOUBLE, spatial_reference VARCHAR, value VARCHAR, raster_id BIGINT, resolution DOUBLE)"
+          ],
+          "access": [
+            "read"
+          ],
+          "authentication": [
+            "optional"
+          ]
+        },
+        {
+          "schema": [
+            "main"
+          ],
+          "name": "arcgis_statistics",
+          "kinds": [
+            "function"
+          ],
+          "signatures": [
+            "arcgis_statistics(url VARCHAR, statistic_field VARCHAR, where_clause VARCHAR, group_by VARCHAR, statistic VARCHAR, bbox VARCHAR) -> TABLE(group_value VARCHAR, statistic_value DOUBLE)"
+          ],
+          "access": [
+            "read"
+          ],
+          "authentication": [
+            "optional"
+          ]
+        }
+      ],
+      "issues": []
+    }
+  },
+  "interface_drift": {
+    "known": true,
+    "current_only": [],
+    "released_only": [],
+    "changed": []
+  },
+  "notebooks": {
+    "01_county_land_and_water.ipynb": {
+      "verified": true,
+      "issues": []
+    },
+    "02_requested_points_and_returned_samples.ipynb": {
+      "verified": true,
+      "issues": []
+    }
+  },
+  "examples": [
+    {
+      "status": "verified",
+      "issues": [],
+      "verified_catalogs": [
+        "released",
+        "current"
+      ],
+      "object": {
+        "schema": [
+          "main"
+        ],
+        "name": "arcgis_query"
+      },
+      "notebook": "01_county_land_and_water.ipynb",
+      "runtime_revision": "v0.6.0",
+      "runtime_catalog_sha256": "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819"
+    },
+    {
+      "status": "verified",
+      "issues": [],
+      "verified_catalogs": [
+        "released",
+        "current"
+      ],
+      "object": {
+        "schema": [
+          "main"
+        ],
+        "name": "arcgis_count"
+      },
+      "notebook": "01_county_land_and_water.ipynb",
+      "runtime_revision": "v0.6.0",
+      "runtime_catalog_sha256": "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819"
+    },
+    {
+      "status": "verified",
+      "issues": [],
+      "verified_catalogs": [
+        "released",
+        "current"
+      ],
+      "object": {
+        "schema": [
+          "main"
+        ],
+        "name": "arcgis_statistics"
+      },
+      "notebook": "01_county_land_and_water.ipynb",
+      "runtime_revision": "v0.6.0",
+      "runtime_catalog_sha256": "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819"
+    },
+    {
+      "status": "verified",
+      "issues": [],
+      "verified_catalogs": [
+        "released",
+        "current"
+      ],
+      "object": {
+        "schema": [
+          "main"
+        ],
+        "name": "arcgis_sample"
+      },
+      "notebook": "02_requested_points_and_returned_samples.ipynb",
+      "runtime_revision": "v0.6.0",
+      "runtime_catalog_sha256": "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819"
+    }
+  ],
+  "issues": []
+}

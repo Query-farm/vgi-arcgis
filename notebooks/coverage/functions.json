@@ -1,0 +1,196 @@
+{
+  "query": "SELECT * FROM duckdb_functions() WHERE database_name='arcgis' ORDER BY schema_name,function_name",
+  "captured_at": "2026-11-14T23:54:58.049556+00:00",
+  "columns": [
+    "database_name",
+    "database_oid",
+    "schema_name",
+    "function_name",
+    "alias_of",
+    "function_type",
+    "description",
+    "comment",
+    "tags",
+    "return_type",
+    "parameters",
+    "parameter_types",
+    "varargs",
+    "macro_definition",
+    "has_side_effects",
+    "internal",
+    "extension_name",
+    "function_oid",
+    "examples",
+    "stability",
+    "categories"
+  ],
+  "rows": [
+    [
+      "arcgis",
+      "22595",
+      "main",
+      "arcgis_count",
+      null,
+      "table",
+      "Count matching ArcGIS features on the server without downloading them",
+      null,
+      {
+        "vgi.category": "arcgis",
+        "vgi.doc_llm": "Count one ArcGIS layer via returnCountOnly=true, without transferring features. Required url; optional where_clause (ArcGIS SQL, default 1=1) and bbox (WGS84 xmin,ymin,xmax,ymax, default empty). Uses scoped arcgis credentials. Returns one feature_count `BIGINT`, including zero. NULL url is rejected; NULL optional arguments use their defaults. Remote comparison/collation and spatial semantics apply; this is not automatic pushdown of DuckDB COUNT(*) or its WHERE clauses. Apply restrictions using the named arguments. Unsafe or missing counts raise an error.",
+        "vgi.doc_md": "## ArcGIS count\n\nReturns one `feature_count BIGINT` using the server's `returnCountOnly` operation. Restrict rows with `where_clause` (ArcGIS SQL) and `bbox` (WGS84 xmin,ymin,xmax,ymax). Uses the same credentials as `arcgis_query`. No feature download. Zero matches return 0; NULL url is rejected; NULL optional arguments use their defaults. Outer SQL filters apply to the summary, so use the named arguments to filter source records.",
+        "vgi.example_queries": "[{\"description\":\"Count New York counties on Census TIGERweb\",\"sql\":\"SELECT feature_count FROM arcgis.main.arcgis_count('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', where_clause := 'STATE = ''36''')\"}]",
+        "vgi.keywords": "[\"count\",\"summary\",\"aggregate\",\"arcgis\"]",
+        "vgi.result_columns_schema": "[{\"name\":\"feature_count\",\"type\":\"BIGINT\",\"description\":\"Number of matching features reported by the ArcGIS server; 0 for no matches.\"}]",
+        "vgi.title": "Server-side Feature Count"
+      },
+      null,
+      [
+        "url",
+        "where_clause",
+        "bbox"
+      ],
+      [
+        "VARCHAR",
+        "VARCHAR",
+        "VARCHAR"
+      ],
+      null,
+      null,
+      null,
+      true,
+      null,
+      22599,
+      [
+        "SELECT feature_count FROM arcgis.main.arcgis_count('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', where_clause := 'STATE = ''36''')"
+      ],
+      null,
+      []
+    ],
+    [
+      "arcgis",
+      "22595",
+      "main",
+      "arcgis_query",
+      null,
+      "table",
+      "Read the features of one ArcGIS FeatureServer/MapServer layer or table, with filter pushdown",
+      null,
+      {
+        "vgi.category": "arcgis",
+        "vgi.doc_llm": "Read every feature of one ArcGIS REST layer or table at `url` (ending in /FeatureServer/<id> or /MapServer/<id>). An ArcGIS Hub / Open Data dataset page URL for one layer also works (`https://<site>/datasets/<itemId>_<id>` or `.../datasets/<orgKey>::<slug>`); it is resolved to the layer's REST URL first. The result columns depend on the layer: one column per attribute field, typed from the layer metadata (object ids and integers as `INTEGER`, small integers as `SMALLINT`, doubles as `DOUBLE`, dates as `TIMESTAMP_MS`, strings and GUIDs as `VARCHAR`). Layers with geometry add `geometry` (`GEOMETRY`), WGS84 longitude/latitude rounded to the ATTACH `precision` (default 7 decimals). Simple WHERE predicates are sent to the server (numeric comparisons, string equality and IN, IS NULL, prefix/contains matches), and so are spatial filters against a constant: `geometry && <box>` and ST_Intersects / ST_Within / ST_Contains / ST_Covers / ST_Touches / ST_Overlaps / ST_Crosses / ST_Equals(geometry, <constant geometry>) make the server return only features whose envelope meets the constant's. Every predicate is also applied exactly to the returned rows. Results are paged automatically. Filter large layers on an attribute (e.g. a FIPS code) or an area: an unfiltered scan downloads the whole layer.",
+        "vgi.doc_md": "## arcgis_query(url)\n\nEvery feature of one ArcGIS FeatureServer/MapServer layer or table, paged automatically.\n\n- `url` is a layer URL (`.../FeatureServer/0`) or an ArcGIS Hub dataset page for one layer (`https://<site>/datasets/<itemId>_0`).\n- Attribute fields become typed columns; the set of columns depends on the layer.\n- Layers with geometry add `geometry` (`GEOMETRY`, WGS84 longitude/latitude).\n- Simple attribute filters and spatial filters against a constant (`&&`, `ST_Intersects`, `ST_Within`, ...) run on the ArcGIS server, so filter large layers on an attribute or an area.",
+        "vgi.example_queries": "[{\"description\":\"Count the parcels in Covington, Virginia (FIPS 51580); the filter runs on the ArcGIS server\",\"sql\":\"SELECT LOCALITY, count(*) AS parcels FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0') WHERE FIPS = '51580' GROUP BY ALL\"},{\"description\":\"Areas of two Virginia cities with DuckDB spatial\",\"sql\":\"SELECT NAMELSAD, ST_Area_Spheroid(geometry) / 1e6 AS km2 FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1') WHERE NAME IN ('Covington', 'Buena Vista') ORDER BY NAMELSAD\"},{\"description\":\"Hospitals in Virginia cities whose names start with 'Rich', from the statewide landmarks layer\",\"sql\":\"SELECT LandmkName, City FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Landmarks/FeatureServer/1') WHERE PlaceType = 'Hospital Points' AND City LIKE 'Rich%' ORDER BY LandmkName\"},{\"description\":\"Parcels touching a small box in downtown Covington; the server returns only features near the box, not the state's millions of parcels\",\"sql\":\"SELECT count(*) AS parcels FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0') WHERE ST_Intersects(geometry, ST_MakeEnvelope(-80.005, 37.785, -79.99, 37.795))\"}]",
+        "vgi.keywords": "[\"arcgis\",\"esri\",\"feature service\",\"featureserver\",\"mapserver\",\"gis\",\"geojson\",\"rest api\",\"layer\",\"query\",\"geospatial\"]",
+        "vgi.result_dynamic_columns_md": "The columns follow the layer at `url`: one column per attribute field, in server order, typed from its ArcGIS field type (object ids and integers `INTEGER`, small integers `SMALLINT`, big integers `BIGINT`, doubles `DOUBLE`, singles `FLOAT`, dates `TIMESTAMP_MS`, strings and GUIDs `VARCHAR`), with the field alias as the column comment. Layers with geometry add one fixed column:\n\n| Name | Type | Description |\n| --- | --- | --- |\n| geometry | GEOMETRY | Feature geometry in WGS84 longitude/latitude, rounded to the ATTACH `precision`. Spatial filters against a constant run on the server. |",
+        "vgi.title": "Query ArcGIS Layer"
+      },
+      null,
+      [
+        "url"
+      ],
+      [
+        "VARCHAR"
+      ],
+      null,
+      null,
+      null,
+      true,
+      null,
+      22600,
+      [
+        "SELECT LOCALITY, count(*) AS parcels FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0') WHERE FIPS = '51580' GROUP BY ALL",
+        "SELECT NAMELSAD, ST_Area_Spheroid(geometry) / 1e6 AS km2 FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1') WHERE NAME IN ('Covington', 'Buena Vista') ORDER BY NAMELSAD",
+        "SELECT LandmkName, City FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Landmarks/FeatureServer/1') WHERE PlaceType = 'Hospital Points' AND City LIKE 'Rich%' ORDER BY LandmkName",
+        "SELECT count(*) AS parcels FROM arcgis.main.arcgis_query('https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0') WHERE ST_Intersects(geometry, ST_MakeEnvelope(-80.005, 37.785, -79.99, 37.795))"
+      ],
+      null,
+      []
+    ],
+    [
+      "arcgis",
+      "22595",
+      "main",
+      "arcgis_sample",
+      null,
+      "table",
+      "Sample elevation or multiband pixel values from an ArcGIS ImageServer at WGS84 points",
+      null,
+      {
+        "vgi.category": "arcgis",
+        "vgi.doc_llm": "Read pixel values from an ArcGIS ImageServer using getSamples. Required url and points_json, a JSON array of WGS84 [longitude,latitude] pairs (maximum 10000; empty gives no rows; NULL/invalid coordinates rejected). Makes batched requests of 100 points, not one RPC per row. Returns point_index (zero-based input index when locationId is supplied, else NULL), sample_x, sample_y, spatial_reference JSON text, value text, raster_id `BIGINT`, resolution `DOUBLE`. Raw value text preserves multiband and NoData values; TRY_CAST to `DOUBLE` for elevation. Uses the service's default mosaic/pixel size and first non-NoData value. Points outside coverage may produce no row. No raster downloads, image export or catalog views. Scoped arcgis credentials work as for arcgis_query.",
+        "vgi.doc_md": "## Image sampling\n\nSample raster pixels at WGS84 points using `arcgis_sample(url, points_json)`. Requests contain up to 100 points each, with a maximum input of 10000. Empty input gives no rows; NULL/invalid input fails. Returns sample coordinates and spatial-reference JSON, raw pixel `value`, source raster ID and resolution. `point_index` refers to the input array when the service returns `locationId`, otherwise NULL. Multiband and NoData values remain text; use `TRY_CAST(value AS DOUBLE)` for elevation. Uncovered points may have no row. Uses the default mosaic and first non-NoData value. This samples pixels; it does not download raster files.",
+        "vgi.example_queries": "[{\"description\":\"Sample USGS bare-earth elevation in meters near the White House\",\"sql\":\"SELECT point_index, TRY_CAST(value AS DOUBLE) AS elevation_m FROM arcgis.main.arcgis_sample('https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer', '[[-77.0365,38.8977],[-77.04,38.90]]') ORDER BY point_index\"}]",
+        "vgi.keywords": "[\"imagery\",\"imageserver\",\"raster\",\"pixels\",\"elevation\",\"usgs\",\"3dep\",\"sampling\"]",
+        "vgi.result_columns_schema": "[{\"name\":\"point_index\",\"type\":\"INTEGER\",\"description\":\"Zero-based index in points_json, if the server supplies locationId; otherwise NULL.\"},{\"name\":\"sample_x\",\"type\":\"DOUBLE\",\"description\":\"Sample location x coordinate as reported by the service.\"},{\"name\":\"sample_y\",\"type\":\"DOUBLE\",\"description\":\"Sample location y coordinate as reported by the service.\"},{\"name\":\"spatial_reference\",\"type\":\"VARCHAR\",\"description\":\"Sample location's spatial reference as JSON; NULL if omitted by the service.\"},{\"name\":\"value\",\"type\":\"VARCHAR\",\"description\":\"Raw pixel value text, preserving multiband values and NoData; TRY_CAST(value AS DOUBLE) reads single-band numeric values.\"},{\"name\":\"raster_id\",\"type\":\"BIGINT\",\"description\":\"Source raster object ID, or NULL when omitted.\"},{\"name\":\"resolution\",\"type\":\"DOUBLE\",\"description\":\"Spatial resolution of the source raster, in its coordinate system's units, or NULL when omitted.\"}]",
+        "vgi.title": "ImageServer Pixel Sampling"
+      },
+      null,
+      [
+        "url",
+        "points_json"
+      ],
+      [
+        "VARCHAR",
+        "VARCHAR"
+      ],
+      null,
+      null,
+      null,
+      true,
+      null,
+      22601,
+      [
+        "SELECT point_index, TRY_CAST(value AS DOUBLE) AS elevation_m FROM arcgis.main.arcgis_sample('https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer', '[[-77.0365,38.8977],[-77.04,38.90]]') ORDER BY point_index"
+      ],
+      null,
+      []
+    ],
+    [
+      "arcgis",
+      "22595",
+      "main",
+      "arcgis_statistics",
+      null,
+      "table",
+      "Compute a numeric statistic, optionally grouped by one field, on an ArcGIS server",
+      null,
+      {
+        "vgi.category": "arcgis",
+        "vgi.doc_llm": "Aggregate a layer using ArcGIS outStatistics. Required url and statistic_field; optional statistic (sum by default; count/min/max/avg/stddev/var also supported), group_by (one field, default empty), where_clause (ArcGIS SQL, default 1=1) and bbox (WGS84 bounds, default empty). Scoped arcgis credentials apply. Returns group_value `VARCHAR` and statistic_value `DOUBLE`; null groups and null aggregate values remain NULL. Without group_by, group_value is NULL. Empty grouped results have no rows. NULL required inputs are rejected; NULL optional arguments use their defaults. Numeric statistics need a numeric field; count counts non-null field values. Large integer aggregates may lose `DOUBLE` precision. A truncated server result raises an error; narrow the source filters. This is an explicit server operation, not automatic DuckDB GROUP BY pushdown.",
+        "vgi.doc_md": "## ArcGIS statistics\n\nCompute `statistic` over `statistic_field`, optionally grouped by `group_by`. Filter source rows using ArcGIS SQL `where_clause` or WGS84 `bbox`. Returns `group_value VARCHAR` and `statistic_value DOUBLE`, retaining NULL values. Defaults: sum, no grouping, all rows. NULL required inputs are rejected; NULL optional arguments use their defaults. Count counts non-null field values. Truncated responses fail rather than return partial groups; narrow the source filter. `DOUBLE` can round large integer aggregates; `arcgis_count` provides exact total feature counts.",
+        "vgi.example_queries": "[{\"description\":\"Sum county land area by state on the Census server\",\"sql\":\"SELECT group_value AS state, statistic_value AS land_area FROM arcgis.main.arcgis_statistics('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', 'AREALAND', group_by := 'STATE', where_clause := 'STATE = ''36''') ORDER BY state\"}]",
+        "vgi.keywords": "[\"statistics\",\"sum\",\"average\",\"group\",\"aggregate\",\"arcgis\"]",
+        "vgi.result_columns_schema": "[{\"name\":\"group_value\",\"type\":\"VARCHAR\",\"description\":\"Group field value as text; NULL for an ungrouped aggregate or a null-valued group.\"},{\"name\":\"statistic_value\",\"type\":\"DOUBLE\",\"description\":\"Server aggregate as `DOUBLE`, possibly NULL for no non-null values. Large integers may lose precision; use arcgis_count for exact total counts.\"}]",
+        "vgi.title": "Server-side Layer Statistics"
+      },
+      null,
+      [
+        "url",
+        "statistic_field",
+        "where_clause",
+        "group_by",
+        "statistic",
+        "bbox"
+      ],
+      [
+        "VARCHAR",
+        "VARCHAR",
+        "VARCHAR",
+        "VARCHAR",
+        "VARCHAR",
+        "VARCHAR"
+      ],
+      null,
+      null,
+      null,
+      true,
+      null,
+      22602,
+      [
+        "SELECT group_value AS state, statistic_value AS land_area FROM arcgis.main.arcgis_statistics('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1', 'AREALAND', group_by := 'STATE', where_clause := 'STATE = ''36''') ORDER BY state"
+      ],
+      null,
+      []
+    ]
+  ]
+}

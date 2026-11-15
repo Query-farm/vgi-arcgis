@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "catalogs": {
+    "released": {
+      "path": "coverage/catalog-released.json",
+      "sha256": "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819",
+      "review": {
+        "status": "approved",
+        "reviewer": "Codex /root/notebooks_earthquakes",
+        "reviewed_at": "2026-11-15T00:07:25.829245+00:00",
+        "catalog_sha256": "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819",
+        "notes": "Complete actual unconfigured release catalog: four fixed functions, no tables/views/COPY; full arguments and representative county/output schemas retained. Optional scoped credentials remain in denominator. No discovery URL configured; arbitrary future dynamic service views are not assigned a fake global denominator. Current source changes only composed examples/agent prompts; full source diff reviewed, registration/signatures/processing/dependencies unchanged. Notebook runtime is released v0.6.0, current evidence is interface compatibility."
+      }
+    },
+    "current": {
+      "path": "coverage/catalog-current.json",
+      "sha256": "03cfb4884528934995ea0d715b108130c4d4f1cf08f2caaeec1578876ac3b80e",
+      "review": {
+        "status": "approved",
+        "reviewer": "Codex /root/notebooks_earthquakes",
+        "reviewed_at": "2026-11-15T00:07:25.829245+00:00",
+        "catalog_sha256": "03cfb4884528934995ea0d715b108130c4d4f1cf08f2caaeec1578876ac3b80e",
+        "notes": "Complete actual unconfigured release catalog: four fixed functions, no tables/views/COPY; full arguments and representative county/output schemas retained. Optional scoped credentials remain in denominator. No discovery URL configured; arbitrary future dynamic service views are not assigned a fake global denominator. Current source changes only composed examples/agent prompts; full source diff reviewed, registration/signatures/processing/dependencies unchanged. Notebook runtime is released v0.6.0, current evidence is interface compatibility."
+      }
+    }
+  },
+  "notebooks": [
+    {
+      "path": "01_county_land_and_water.ipynb",
+      "sha256": "39fec1da0606663afe12d1d3ce3f367cb9c34ff38e2545ab139406a1f40284b2",
+      "execution": {
+        "path": "coverage/run-01.json",
+        "sha256": "08ee3c2472b3c17ba1c39a4422f49986d36cd1047398ceadff6461c86a8e0944"
+      }
+    },
+    {
+      "path": "02_requested_points_and_returned_samples.ipynb",
+      "sha256": "5109047cd02a743e9d3001bca3a9c112533db295cd540f2b31b877db254d75b3",
+      "execution": {
+        "path": "coverage/run-02.json",
+        "sha256": "326555c4b95691427fb04a583c5c78cb58ceb1c26fd881d0a266266564142024"
+      }
+    }
+  ],
+  "examples": [
+    {
+      "object": {
+        "schema": "main",
+        "name": "arcgis_query"
+      },
+      "notebook": "01_county_land_and_water.ipynb",
+      "sql": [
+        {
+          "cell": "population-query",
+          "reference": "arcgis.main.arcgis_query"
+        }
+      ],
+      "narrative_cells": [
+        "question",
+        "population-story",
+        "area-story",
+        "experiment-story"
+      ],
+      "result_cells": [
+        "availability-finding",
+        "counties-finding",
+        "summary-finding",
+        "area-chart",
+        "sensitivity-chart",
+        "checks-finding"
+      ],
+      "interpretation_cells": [
+        "summary-finding",
+        "sensitivity-chart",
+        "area-story"
+      ],
+      "review": {
+        "status": "approved",
+        "reviewer": "Codex /root/notebooks_earthquakes",
+        "reviewed_at": "2026-11-15T00:07:25.829245+00:00",
+        "notebook_sha256": "39fec1da0606663afe12d1d3ce3f367cb9c34ff38e2545ab139406a1f40284b2",
+        "catalog_sha256": [
+          "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819",
+          "03cfb4884528934995ea0d715b108130c4d4f1cf08f2caaeec1578876ac3b80e"
+        ],
+        "purpose": "Retrieve a complete bounded attribute population to distinguish total footprint, land area and weighted water share.",
+        "finding": "Fourteen unique Massachusetts counties materialized once with a direct pushed STATE predicate and attribute-only projection, no geometry/LIMIT. Exact snapshot fingerprint guards live experiment comparability. Unweighted29.7% versus area-weighted26.1% water share retained; exploratory threshold does not infer flood risk/population/usable land."
+      }
+    },
+    {
+      "object": {
+        "schema": "main",
+        "name": "arcgis_count"
+      },
+      "notebook": "01_county_land_and_water.ipynb",
+      "sql": [
+        {
+          "cell": "population-query",
+          "reference": "arcgis.main.arcgis_count"
+        }
+      ],
+      "narrative_cells": [
+        "population-story",
+        "checks-story"
+      ],
+      "result_cells": [
+        "availability-finding",
+        "checks-finding"
+      ],
+      "interpretation_cells": [
+        "availability-finding",
+        "population-story"
+      ],
+      "review": {
+        "status": "approved",
+        "reviewer": "Codex /root/notebooks_earthquakes",
+        "reviewed_at": "2026-11-15T00:07:25.829245+00:00",
+        "notebook_sha256": "39fec1da0606663afe12d1d3ce3f367cb9c34ff38e2545ab139406a1f40284b2",
+        "catalog_sha256": [
+          "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819",
+          "03cfb4884528934995ea0d715b108130c4d4f1cf08f2caaeec1578876ac3b80e"
+        ],
+        "purpose": "Check full feature retrieval against an independent exact remote count with explicit source filtering.",
+        "finding": "Named where_clause limits server count to STATE25; exact BIGINT14 reconciles local row count and unique GEOIDs. Distinct request timing prevents claiming an atomic source snapshot. Nonempty actual population, not an empty diagnostic."
+      }
+    },
+    {
+      "object": {
+        "schema": "main",
+        "name": "arcgis_statistics"
+      },
+      "notebook": "01_county_land_and_water.ipynb",
+      "sql": [
+        {
+          "cell": "statistics-query",
+          "reference": "arcgis.main.arcgis_statistics"
+        }
+      ],
+      "narrative_cells": [
+        "statistics-story",
+        "area-story",
+        "checks-story"
+      ],
+      "result_cells": [
+        "statistics-finding",
+        "checks-finding"
+      ],
+      "interpretation_cells": [
+        "statistics-finding",
+        "statistics-story"
+      ],
+      "review": {
+        "status": "approved",
+        "reviewer": "Codex /root/notebooks_earthquakes",
+        "reviewed_at": "2026-11-15T00:07:25.829245+00:00",
+        "notebook_sha256": "39fec1da0606663afe12d1d3ce3f367cb9c34ff38e2545ab139406a1f40284b2",
+        "catalog_sha256": [
+          "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819",
+          "03cfb4884528934995ea0d715b108130c4d4f1cf08f2caaeec1578876ac3b80e"
+        ],
+        "purpose": "Reconcile explicit remote land/water sums with the downloaded county attributes before weighting.",
+        "finding": "Two grouped server sums use exact field names and the same source predicate. Each returns one state25 row; DOUBLE sums agree with local integer totals within1m\u00b2 (actual difference0). This is explicit remote aggregation, not automatic aggregate pushdown or a guarantee of transactional retrieval."
+      }
+    },
+    {
+      "object": {
+        "schema": "main",
+        "name": "arcgis_sample"
+      },
+      "notebook": "02_requested_points_and_returned_samples.ipynb",
+      "sql": [
+        {
+          "cell": "roster-query",
+          "reference": "arcgis.main.arcgis_sample"
+        }
+      ],
+      "narrative_cells": [
+        "question",
+        "roster-story",
+        "availability-story",
+        "experiment-story"
+      ],
+      "result_cells": [
+        "raw-finding",
+        "fingerprint-finding",
+        "sample-chart",
+        "checks-finding"
+      ],
+      "interpretation_cells": [
+        "sample-chart",
+        "availability-story",
+        "checks-story"
+      ],
+      "review": {
+        "status": "approved",
+        "reviewer": "Codex /root/notebooks_earthquakes",
+        "reviewed_at": "2026-11-15T00:07:25.829245+00:00",
+        "notebook_sha256": "5109047cd02a743e9d3001bca3a9c112533db295cd540f2b31b877db254d75b3",
+        "catalog_sha256": [
+          "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819",
+          "03cfb4884528934995ea0d715b108130c4d4f1cf08f2caaeec1578876ac3b80e"
+        ],
+        "purpose": "Keep the requested-location denominator when a real imagery service omits sample rows.",
+        "finding": "Five authored WGS84 points sent in one bounded batch; actual four returned samples attributed by valid unique locationId and matching WGS84 coordinates. Left join preserves omitted(0,0) control as unavailable, never0elevation. Finite raw single-band values classified at300\u21921000m while fingerprint/raw provenance fixed. No survey accuracy, citywide elevation, vertical datum or hazard inference."
+      }
+    }
+  ]
+}

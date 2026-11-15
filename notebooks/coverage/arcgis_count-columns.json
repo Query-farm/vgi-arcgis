@@ -1,0 +1,22 @@
+{
+  "query": "DESCRIBE SELECT * FROM arcgis.main.arcgis_count('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1',where_clause:='STATE = ''25''')",
+  "captured_at": "2026-11-14T23:54:58.089207+00:00",
+  "columns": [
+    "column_name",
+    "column_type",
+    "null",
+    "key",
+    "default",
+    "extra"
+  ],
+  "rows": [
+    [
+      "feature_count",
+      "BIGINT",
+      "YES",
+      null,
+      null,
+      null
+    ]
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "notebook_sha256": "39fec1da0606663afe12d1d3ce3f367cb9c34ff38e2545ab139406a1f40284b2",
+  "catalog_sha256": "49ebcb57280776c95f8656e8f9f60879276daf8e29c6a090f93afee6bf8f2819",
+  "worker_revision": "v0.6.0",
+  "status": "success",
+  "executed_at": "2026-11-15T00:06:43.650329+00:00",
+  "engine": "Haybarn2.0.0rc11 / published VGI extension",
+  "command": "uv run --locked python artifacts/execute_with_receipts.py; invokes python -m vgi_notebooks.execute 01_county_land_and_water.ipynb",
+  "catalog_aliases": [
+    "arcgis"
+  ],
+  "cells": [
+    {
+      "id": "parameters",
+      "status": "success",
+      "execution_count": 1,
+      "source_sha256": "5a247d9c18797682fdbf28f211355a81e27652329c5ee4830c21f4cabe57593d",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "bootstrap",
+      "status": "success",
+      "execution_count": 2,
+      "source_sha256": "c01efcb60d7dc41de8d387ccc750ddee532c5b4b6dd9c405cd437b3cca4e7f1b",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "setup",
+      "status": "success",
+      "execution_count": 3,
+      "source_sha256": "051ab2e17a531dcbedc50dabd92ec14d85bc0f6f229a395aaa8143eb02253f60",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "connection",
+      "status": "success",
+      "execution_count": 4,
+      "source_sha256": "0180f2bfe0b2563ff25345ccda1d620121a6cabe24ec522492ca8c84b88374f2",
+      "outputs_sha256": "c17c19a5c176854762c97c96bafef62f247262c382ecc6533cf998819c105960"
+    },
+    {
+      "id": "population-query",
+      "status": "success",
+      "execution_count": 5,
+      "source_sha256": "1ac615e0c9179e40bfcd128c291c1596c4547e0a1ddc015233259675ced1f763",
+      "outputs_sha256": "23c8940505861b0952ea3eeab2c75a52fa17ba150448cdb4800ec9653ee5050b"
+    },
+    {
+      "id": "availability-query",
+      "status": "success",
+      "execution_count": 6,
+      "source_sha256": "4e4d1556c79602e7ad8833617abe43fee3d0bf376842401883e5aa1f85057d5a",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "availability-finding",
+      "status": "success",
+      "execution_count": 7,
+      "source_sha256": "fa4d7cb71b5ad87660cc292cb1e907c6fe7712042fbcb13981c0a346fc70010a",
+      "outputs_sha256": "dec203336104c97ed94578a7fbcf4492a69d9b2eb6e79202324e706463bc0558"
+    },
+    {
+      "id": "fingerprint-query",
+      "status": "success",
+      "execution_count": 8,
+      "source_sha256": "96bf25871b97d7aca7ce4adc5fa13f08cb6cf18c0b58f76ed88d70631fc234bd",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "fingerprint-finding",
+      "status": "success",
+      "execution_count": 9,
+      "source_sha256": "a3a711229b00aeb75f4a4e1796888d0f1488314f96e5b8cd5223de530972e10a",
+      "outputs_sha256": "1bb3e83e781bdcb2eb5d81bc958e2cb77eb992df7ba7a1548772d391ec724550"
+    },
+    {
+      "id": "statistics-query",
+      "status": "success",
+      "execution_count": 10,
+      "source_sha256": "4c2119dfc6610c59a6eb4805cc194627f178b57aa403a9ba769972fb57c1a8ee",
+      "outputs_sha256": "5bd2e32b8da421423a3de9177c238d6e1764ee417af110c4bd906f33b3869ac9"
+    },
+    {
+      "id": "statistics-results",
+      "status": "success",
+      "execution_count": 11,
+      "source_sha256": "82bfa6a1e3397fe9eb233fcb5ea3f3f5e6cc9a7641777db9bb625534533a6b6d",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "statistics-finding",
+      "status": "success",
+      "execution_count": 12,
+      "source_sha256": "3784f48c980d51666cc6d47e995cc560eea1c43938ec48d079581358f21dbfda",
+      "outputs_sha256": "f1fc91727d202451194809fd12a8d05fc8455589beb48beeb3997c7b11f8b491"
+    },
+    {
+      "id": "area-query",
+      "status": "success",
+      "execution_count": 13,
+      "source_sha256": "ed7bea9b0ac6208c25418d2a78436ae9d915b2a1aeb59d89d940ac83f961bbd7",
+      "outputs_sha256": "8007d7cd4fd75669fbd54fdb42a975adcf41054b760f271eae58410aeeafd130"
+    },
+    {
+      "id": "counties-query",
+      "status": "success",
+      "execution_count": 14,
+      "source_sha256": "5a9726ab7a69ba9782e8ceddd7eadce007c4fad08ad32d5be6602c5e88084f73",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "counties-finding",
+      "status": "success",
+      "execution_count": 15,
+      "source_sha256": "3ab1eddc16466434a691ba33d60cc6494f3aef92155f2c7f900f951e6ee49326",
+      "outputs_sha256": "28aed5efd72943dc14beb592807f6e6463116d65dd0e0253b3609db4d8c4ef4b"
+    },
+    {
+      "id": "summary-query",
+      "status": "success",
+      "execution_count": 16,
+      "source_sha256": "e72b0a046724cdc47883c206dfd6a37abe0426abcc70f885eb9ecc6d9b79e5ef",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "summary-finding",
+      "status": "success",
+      "execution_count": 17,
+      "source_sha256": "992f8014db20c5ee61ecd2105be1bc9a90fc5019ace47f54a7fbc4b1cebf90d4",
+      "outputs_sha256": "caaffb68c99e2dbe43796e38dc344a252b15dd71a9d4ae4bf13146b7b65309e5"
+    },
+    {
+      "id": "area-chart",
+      "status": "success",
+      "execution_count": 18,
+      "source_sha256": "c7ec795d2cc64706dfe9fb16f5d9e2be0c6600b8c94f3ec488f027a42144fd22",
+      "outputs_sha256": "79e3dc3461829b60a4e3d99d8cf796a3c728e0297a587c6ac9a18a6d5229b146"
+    },
+    {
+      "id": "sensitivity-query",
+      "status": "success",
+      "execution_count": 19,
+      "source_sha256": "1606af115103c5b72f8e857bd2b4adda967a88f7941e88a925b4b5e3d3c61692",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "sensitivity-chart",
+      "status": "success",
+      "execution_count": 20,
+      "source_sha256": "6346c75ad2d6d4f6a26c6e1082c9f298eb79b7fff64e551cb83ff822b8dc4ed9",
+      "outputs_sha256": "e17b3c655e581cdcfc4c50b24e171fcd43de0766986bf3ac8041b52f2c50ab41"
+    },
+    {
+      "id": "checks-query",
+      "status": "success",
+      "execution_count": 21,
+      "source_sha256": "e0edd111cc3245f5c16aa3134b1e2c0b33cb6d43623d3c3cd02bc372cc5590a4",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "checks-finding",
+      "status": "success",
+      "execution_count": 22,
+      "source_sha256": "8b269d30be344651fa0a868188df6545a29b0e68a6578c52502bac7301b0cd8e",
+      "outputs_sha256": "045dd1edd6799c45f1f63c36b6c17eecbbc3537ae67a1037f26d90a1cfa4958e"
+    },
+    {
+      "id": "cleanup",
+      "status": "success",
+      "execution_count": 23,
+      "source_sha256": "2b6b9403473d1a210cc040031334825846584ca1317e96d63c05880c73328be3",
+      "outputs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ]
+}

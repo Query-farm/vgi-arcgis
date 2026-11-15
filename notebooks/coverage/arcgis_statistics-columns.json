@@ -1,0 +1,30 @@
+{
+  "query": "DESCRIBE SELECT * FROM arcgis.main.arcgis_statistics('https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1','AREALAND',where_clause:='STATE = ''25''')",
+  "captured_at": "2026-11-14T23:54:58.095066+00:00",
+  "columns": [
+    "column_name",
+    "column_type",
+    "null",
+    "key",
+    "default",
+    "extra"
+  ],
+  "rows": [
+    [
+      "group_value",
+      "VARCHAR",
+      "YES",
+      null,
+      null,
+      null
+    ],
+    [
+      "statistic_value",
+      "DOUBLE",
+      "YES",
+      null,
+      null,
+      null
+    ]
+  ]
+}
