@@ -24,7 +24,7 @@ import { type DiscoveredSchema, type DiscoveredView, directorySchemas, mainViews
 import type { RequestAuth } from "./http.ts";
 import { hubSiteSchemas, itemViews, resolveUrl } from "./hub.ts";
 import { arcgisSample } from "./imagery.ts";
-import { CATALOG_DOC_MD, CATALOG_NAME, CATALOG_TAGS, SCHEMA_DOC_MD, SCHEMA_TAGS, SOURCE_URL } from "./meta.ts";
+import { CATALOG_COMMENT, CATALOG_NAME, CATALOG_TAGS, SCHEMA_COMMENT, SCHEMA_TAGS, SOURCE_URL } from "./meta.ts";
 import { ATTACH_OPTIONS, decodeSettings, encodeSettings, settingsFromOptions } from "./options.ts";
 import { arcgisQuery } from "./query.ts";
 import { arcgisCount, arcgisStatistics } from "./summary.ts";
@@ -51,7 +51,7 @@ const ALL_EXAMPLES = stampExampleQueries(FUNCTIONS);
 
 export const CATALOG: CatalogDescriptor = {
   name: CATALOG_NAME,
-  comment: CATALOG_DOC_MD,
+  comment: CATALOG_COMMENT,
   sourceUrl: SOURCE_URL,
   tags: CATALOG_TAGS,
   attachOptions: ATTACH_OPTIONS,
@@ -59,7 +59,7 @@ export const CATALOG: CatalogDescriptor = {
   schemas: [
     {
       path: ["main"],
-      comment: SCHEMA_DOC_MD,
+      comment: SCHEMA_COMMENT,
       functions: FUNCTIONS,
       tags: { ...SCHEMA_TAGS, "vgi.example_queries": JSON.stringify(ALL_EXAMPLES) },
     },

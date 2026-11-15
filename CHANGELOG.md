@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1
+
+Metadata only; no change to the SQL surface.
+
+- The catalog comment is now one plain paragraph (VGI107), and the schema comment one
+  sentence; the long guides stay in `vgi.doc_md` / `vgi.doc_llm`.
+- The catalog docs link the ArcGIS REST API reference for every endpoint the worker calls
+  (layer query, services directory, getSamples, Hub API, generateToken, OAuth token).
+- The catalog and schema guides describe the worker instead of listing its functions;
+  per-function guidance stays on each function.
+
 ## 0.6.0
 
 All operations accept caller-supplied ArcGIS URLs. The worker has no built-in country
