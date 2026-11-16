@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2 (2026-11-16)
+
+- Bump @query-farm/vgi to 0.50.1.
+
 ## 0.6.1
 
 Metadata only; no change to the SQL surface.
