@@ -8,6 +8,8 @@
 - The Docker image supports Orchard hosted mode (`VGI_ORCHARD_HOSTED=1`): HTTP only, Orchard Pass
   authentication, large values through the Orchard blob vendor; the HEALTHCHECK uses `HEAD /health`.
 - CI and `make` run the SQL tests on haybarn-unittest 2.0.1rc3.
+- The DuckDB-spatial example computes centroids instead of `ST_Area_Spheroid`, which DuckDB 2.0 refuses
+  until `geometry_always_xy` is set.
 
 ## 0.6.3 (2026-11-16)
 

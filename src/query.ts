@@ -272,11 +272,12 @@ export const arcgisQuery = defineTableFunction<QueryArgs, ScanState>({
     },
     {
       sql:
-        "SELECT NAMELSAD, ST_Area_Spheroid(geometry) / 1e6 AS km2 " +
+        "SELECT NAMELSAD, round(ST_X(ST_Centroid(geometry)), 4) AS lon, " +
+        "round(ST_Y(ST_Centroid(geometry)), 4) AS lat " +
         "FROM arcgis.main.arcgis_query(" +
         "'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Admin_Boundaries/FeatureServer/1') " +
         "WHERE NAME IN ('Covington', 'Buena Vista') ORDER BY NAMELSAD",
-      description: "Areas of two Virginia cities with DuckDB spatial",
+      description: "Centroids of two Virginia cities with DuckDB spatial",
     },
     {
       sql:
