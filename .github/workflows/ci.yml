@@ -17,7 +17,7 @@ concurrency:
 env:
   # Pinned together: the SQL test runner and the metadata checker must speak the
   # same VGI protocol as the SDK. Template updates bump these (make template-diff).
-  HAYBARN_VERSION: "2.0.0rc11"
+  HAYBARN_VERSION: "2.0.1rc3"
 
 jobs:
   # bun install --frozen-lockfile, tsc --noEmit (the `typecheck` script), bun test.
@@ -67,8 +67,8 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then
             # DuckDB can't exec the sh wrappers in bin/ on Windows, so compile
             # the worker and the recipe runner into standalone executables.
-            bun build src/worker.ts --compile --outfile dist/vgi-arcgis-worker.exe
-            bun build examples/run.ts --compile --outfile dist/run-recipe.exe
+            bun build src/worker.ts --compile --external @aws-sdk/client-s3 --external @aws-sdk/s3-request-presigner --external @google-cloud/storage --outfile dist/vgi-arcgis-worker.exe
+            bun build examples/run.ts --compile --external @aws-sdk/client-s3 --external @aws-sdk/s3-request-presigner --external @google-cloud/storage --outfile dist/run-recipe.exe
             WORKER="$(cygpath -m "$PWD/dist/vgi-arcgis-worker.exe")"
             RECIPES_WORKER="$(cygpath -m "$PWD/dist/run-recipe.exe")"
             HAYBARN_UNITTEST="$PWD/.tools/Scripts/haybarn-unittest.exe"

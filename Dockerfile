@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # One image, both transports:
-#   docker run -p 8000:8000 IMAGE         -> HTTP on $PORT (default 8000; GET /health)
+#   docker run -p 8000:8000 IMAGE         -> HTTP on $PORT (default 8000; HEAD /health is anonymous even in hosted mode)
 #   docker run -i IMAGE stdio             -> stdio worker, for DuckDB on the same host
 FROM oven/bun:1.3-slim
 
@@ -28,5 +28,5 @@ USER bun
 COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
-    CMD bun -e "const r = await fetch('http://127.0.0.1:' + (process.env.PORT || '8000') + '/health'); process.exit(r.ok ? 0 : 1)"
+    CMD bun -e "const r = await fetch('http://127.0.0.1:' + (process.env.PORT || '8000') + '/health', { method: 'HEAD' }); process.exit(r.ok ? 0 : 1)"
 ENTRYPOINT ["docker-entrypoint.sh"]

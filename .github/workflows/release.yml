@@ -51,4 +51,7 @@ jobs:
     with:
       bin: vgi-arcgis-worker
       entry: src/worker.ts
+      # @query-farm/vgi 0.52.2 statically imports the S3/GCS object stores, which lazily import optional
+      # peers the worker does not install; mark them external so `bun build --compile` bundles.
+      bun_build_args: "--external @aws-sdk/client-s3 --external @aws-sdk/s3-request-presigner --external @google-cloud/storage"
       version_check_cmd: ci/check-version.sh

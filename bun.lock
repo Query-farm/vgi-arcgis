@@ -5,8 +5,8 @@
     "": {
       "dependencies": {
         "@query-farm/apache-arrow": "^21.1.1",
-        "@query-farm/vgi": "^0.50.1",
-        "@query-farm/vgi-rpc": "^0.29.7",
+        "@query-farm/vgi": "^0.52.2",
+        "@query-farm/vgi-rpc": "^0.30.2",
       },
       "devDependencies": {
         "@biomejs/biome": "^2.6.6",
@@ -42,11 +42,11 @@
 
     "@query-farm/apache-arrow": ["@query-farm/apache-arrow@21.1.1", "", { "dependencies": { "@swc/helpers": "^0.5.11", "@types/command-line-args": "^5.2.3", "@types/command-line-usage": "^5.0.4", "@types/node": "^25.2.0", "command-line-args": "^6.0.1", "command-line-usage": "^7.0.1", "flatbuffers": "^25.1.24", "json-with-bigint": "^3.5.3", "tslib": "^2.6.2" }, "bin": { "arrow2csv": "bin/arrow2csv.js" } }, "sha512-MDACnRrvC4aGes+rGZ/UsNidtW+WX0UN4wqijQ3vsGlKSVvee1kkXjGci8RQqzF4WXY0nJfteGRVqkrGIEXSbw=="],
 
-    "@query-farm/flechette": ["@query-farm/flechette@2.7.1", "", { "dependencies": { "@uwdata/wk-geojson": "^0.0.1" } }, "sha512-TL+u+0598AnFGlFteLCqaGsMpmymyMzgwGAgAsr9ZuTx/3lmG8I8M9gZfrnULGXXNWKPQ/u9MQTgISC2dJW0SA=="],
+    "@query-farm/flechette": ["@query-farm/flechette@2.7.2", "", { "dependencies": { "@uwdata/wk-geojson": "^0.0.1" } }, "sha512-ZsXFDpNj4KVOUsm7rI3c90t6xfqkpV7VlF+izdjzRGoWuVnApw9goKFnDXHJNfqcafyE2zb2DWaTumrGFwAhHQ=="],
 
-    "@query-farm/vgi": ["@query-farm/vgi@0.50.1", "", { "dependencies": { "@noble/ciphers": "^2.3.0", "@query-farm/flechette": "^2.7.1" }, "peerDependencies": { "@query-farm/apache-arrow": "^21.1.1", "@query-farm/vgi-rpc": "^0.29.7" } }, "sha512-sNBttEYY85hR0KAp2psqhTPSD33rcmBEi16OqxbPk18BwXmqlEA0wjz4VhCTHwmTPP9zWH4v+7ftNZ7dKVG5eg=="],
+    "@query-farm/vgi": ["@query-farm/vgi@0.52.2", "", { "dependencies": { "@noble/ciphers": "^2.3.0", "@query-farm/flechette": "^2.7.2", "jose": "^6.2.0" }, "peerDependencies": { "@aws-sdk/client-s3": ">=3.0.0", "@aws-sdk/s3-request-presigner": ">=3.0.0", "@google-cloud/storage": ">=7.0.0", "@query-farm/apache-arrow": "^21.1.1", "@query-farm/vgi-rpc": "^0.30.2" }, "optionalPeers": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner", "@google-cloud/storage"] }, "sha512-UC2b+nQYLsosPMFGpmAMq8z7v7ZPvxZoi4dE5LjsZqC1f4tC20rU43wEC9GA0B0EB9DRpj2S6Tgwc1oRg/byPw=="],
 
-    "@query-farm/vgi-rpc": ["@query-farm/vgi-rpc@0.29.7", "", { "dependencies": { "@noble/ciphers": "^2.2.0", "@query-farm/apache-arrow": "^21.1.1", "@query-farm/flechette": "^2.7.1", "fzstd": "^0.1.1", "oauth4webapi": "^3.8.6" }, "peerDependencies": { "@aws-sdk/client-s3": ">=3.0.0", "@aws-sdk/s3-request-presigner": ">=3.0.0", "@google-cloud/storage": ">=7.0.0", "@momics/iroh-http-node": ">=0.6.2 <1", "@number0/iroh": ">=1.1.0 <2", "@opentelemetry/api": ">=1.4.0" }, "optionalPeers": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner", "@google-cloud/storage", "@momics/iroh-http-node", "@number0/iroh", "@opentelemetry/api"] }, "sha512-leFlMh6uvEhH5DJ2HGVNKxeYsmI3zeFLJVyYIxwNDcRdjzcBje6NYu0ptuP6gE+eUawjM2iAsTGOScGg3wX/9g=="],
+    "@query-farm/vgi-rpc": ["@query-farm/vgi-rpc@0.30.2", "", { "dependencies": { "@noble/ciphers": "^2.2.0", "@query-farm/apache-arrow": "^21.1.1", "@query-farm/flechette": "^2.7.2", "fzstd": "^0.1.1", "oauth4webapi": "^3.8.6" }, "peerDependencies": { "@aws-sdk/client-s3": ">=3.0.0", "@aws-sdk/s3-request-presigner": ">=3.0.0", "@google-cloud/storage": ">=7.0.0", "@momics/iroh-http-node": ">=0.6.2 <1", "@number0/iroh": ">=1.1.0 <2", "@opentelemetry/api": ">=1.4.0" }, "optionalPeers": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner", "@google-cloud/storage", "@momics/iroh-http-node", "@number0/iroh", "@opentelemetry/api"] }, "sha512-HnttpDDD8haPEpOmtiWtuH8s6j0cboQvNoE3iKdMk6fyCYH2mQNPVAY1ilt8LO+PKQzBhFLKiC+QhlrPvOc0dg=="],
 
     "@swc/helpers": ["@swc/helpers@0.5.24", "", {}, "sha512-6tcXo4kA8HgGO7AVmawB57RYi/piBPYVHVcO6dXjX+SZw8GoHmi262sp4v2Ha2kNP9Cx84qei27yT+fjS1lxgg=="],
 
@@ -85,6 +85,8 @@
     "fzstd": ["fzstd@0.1.1", "", {}, "sha512-dkuVSOKKwh3eas5VkJy1AW1vFpet8TA/fGmVA5krThl8YcOVE/8ZIoEA1+U1vEn5ckxxhLirSdY837azmbaNHA=="],
 
     "has-flag": ["has-flag@4.0.0", "", {}, "sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ=="],
+
+    "jose": ["jose@6.2.18", "", {}, "sha512-doV4thUwgkrycJH4yLeqwTGIIZphHl+pk7CPReuMIhYhncmgzdko85MaCG4YQFTxqMFr1/oEH32tZuKKovcDEg=="],
 
     "json-with-bigint": ["json-with-bigint@3.5.12", "", {}, "sha512-uwbF/wSSuOgC7qqlq27Xp5B6a2MHVug3t0idZdTqu0JnlFvgJuH7ju+KAk/J06C7GfhoYy2gnb9wz2INqcne7w=="],
 

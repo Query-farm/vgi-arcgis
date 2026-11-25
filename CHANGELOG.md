@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 (2026-11-25)
+
+- VGI protocol 3.4: bump @query-farm/vgi to 0.52 and @query-farm/vgi-rpc to 0.30. **Requires the
+  3.4 vgi extension**: DuckDB 2.0 (`INSTALL vgi FROM query_farm`) or Haybarn 2.0.1+; Haybarn 2.0.0
+  still serves the 3.3 extension, which cannot attach this worker.
+- The Docker image supports Orchard hosted mode (`VGI_ORCHARD_HOSTED=1`): HTTP only, Orchard Pass
+  authentication, large values through the Orchard blob vendor; the HEALTHCHECK uses `HEAD /health`.
+- CI and `make` run the SQL tests on haybarn-unittest 2.0.1rc3.
+
 ## 0.6.3 (2026-11-16)
 
 - CI tooling (haybarn-unittest, lint helpers) runs on Python 3.14.
@@ -88,15 +97,15 @@ Breaking: `arcgis_query` returns `geometry` (`GEOMETRY`) instead of `geometry_ge
   and metadata is cached per identity.
 - Built on @query-farm/vgi 0.49.2, whose SDK-side `&&` check matches DuckDB 2.0 core.
 
-Targets: @query-farm/vgi 0.49 · VGI protocol 3.2 · Haybarn 2.0.0rc11 and DuckDB 2.0.0.
+Targets: @query-farm/vgi 0.49 · VGI protocol 3.2 · Haybarn 2.0.1rc3 and DuckDB 2.0.0.
 
 ## 0.3.0
 
 - VGI protocol 3.2: built on @query-farm/vgi 0.49.1, so the worker loads in the current
-  vgi extension (Haybarn 2.0.0rc11 community build 7d716ef). Workers on protocol 3.1 are
+  vgi extension (Haybarn 2.0.1rc3 community build 7d716ef). Workers on protocol 3.1 are
   rejected by it. No behaviour changes.
 
-Targets: @query-farm/vgi 0.49 · VGI protocol 3.2 · Haybarn 2.0.0rc11 and DuckDB 2.0.0.
+Targets: @query-farm/vgi 0.49 · VGI protocol 3.2 · Haybarn 2.0.1rc3 and DuckDB 2.0.0.
 
 ## 0.2.0
 
@@ -143,5 +152,5 @@ First release.
 - Retries on 429/5xx with `Retry-After`, 60 s timeouts, 5-minute metadata cache.
 - Not yet: token-secured services, ArcGIS Hub site URLs, spatial filter pushdown.
 
-Targets: @query-farm/vgi 0.48 · VGI protocol 3.1 · Haybarn 2.0.0rc11 and DuckDB 2.0.0 ·
+Targets: @query-farm/vgi 0.48 · VGI protocol 3.1 · Haybarn 2.0.1rc3 and DuckDB 2.0.0 ·
 vgi-lint-check 2.x (unpinned). Starter template v1.1.4.

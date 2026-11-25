@@ -411,7 +411,7 @@ Put a hosted worker behind TLS and authentication; see
 
 ## Tested against
 
-Stock DuckDB 2.0.0 (VGI from the `query_farm` repository) and Haybarn 2.0.0rc11:
+Stock DuckDB 2.0.0 (VGI from the `query_farm` repository) and Haybarn 2.0.1rc3:
 
 | Server | Kind | Checked |
 |---|---|---|
@@ -454,7 +454,7 @@ The runner prints individual results and writes the tested SQL, engine/extension
 versions and results to `.tools/live.json`. A 180-second deadline covers the entire run;
 invoke `scripts/test_live.py --cases <path> --timeout <seconds>` to change it.
 Live checks are opt-in because service outages and changing data should not make the
-offline fixture suite flaky. `make check` uses Haybarn 2.0.0rc11 for its SQL tests.
+offline fixture suite flaky. `make check` uses Haybarn 2.0.1rc3 for its SQL tests.
 
 `src/` layout: `catalog.ts` (ATTACH and views), `discovery.ts` (walking directories and
 services), `hub.ts` (Hub site and dataset URLs), `query.ts` (`arcgis_query`), `where.ts`
